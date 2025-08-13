@@ -1,0 +1,67 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+
+  resumes   Resume[]
+  matches   Match[]
+  drafts    ApplicationDraft[]
+}
+
+model Resume {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  text      String
+  skills    Json
+  yearsExp  Int?
+  createdAt DateTime @default(now())
+}
+
+model Job {
+  id             String   @id @default(cuid())
+  source         String
+  title          String
+  company        String
+  location       String?
+  description    String
+  skillsRequired Json
+  url            String?
+  createdAt      DateTime @default(now())
+
+  matches        Match[]
+  drafts         ApplicationDraft[]
+}
+
+model Match {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  job       Job      @relation(fields: [jobId], references: [id])
+  jobId     String
+  score     Float
+  reasons   Json
+  createdAt DateTime @default(now())
+}
+
+model ApplicationDraft {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  job         Job      @relation(fields: [jobId], references: [id])
+  jobId       String
+  coverLetter String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
