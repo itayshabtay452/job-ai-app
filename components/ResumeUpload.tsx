@@ -3,19 +3,25 @@
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 
+type ParseResultOK = { ok: true; resumeId: string; pageCount: number; chars: number };
+type ParseResultNeedsOCR = { ok: true; id: string; status: "needs_ocr"; pageCount: number };
+type ParseResultError = { error: string };
+type ParseResult = ParseResultOK | ParseResultNeedsOCR | ParseResultError;
+
 export default function ResumeUpload() {
   const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
-  const [message, setMessage] = useState<string>("");
+  const [phase, setPhase] = useState<"idle" | "uploading" | "parsing" | "done" | "error">("idle");
+  const [msg, setMsg] = useState<string>("");
+  const [result, setResult] = useState<ParseResult | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   function validate(f: File) {
     if (f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) {
-      setMessage("נא לבחור קובץ PDF בלבד");
+      setMsg("נא לבחור קובץ PDF בלבד");
       return false;
     }
     if (f.size > 5 * 1024 * 1024) {
-      setMessage("קובץ גדול מדי (מקסימום 5MB)");
+      setMsg("קובץ גדול מדי (מקסימום 5MB)");
       return false;
     }
     return true;
@@ -25,7 +31,7 @@ export default function ResumeUpload() {
     const f = e.target.files?.[0];
     if (!f) return;
     if (!validate(f)) return setFile(null);
-    setMessage("");
+    resetView();
     setFile(f);
   }
 
@@ -34,34 +40,64 @@ export default function ResumeUpload() {
     const f = e.dataTransfer.files?.[0];
     if (!f) return;
     if (!validate(f)) return setFile(null);
-    setMessage("");
+    resetView();
     setFile(f);
   }
 
-  async function onUpload() {
+  function resetView() {
+    setPhase("idle");
+    setMsg("");
+    setResult(null);
+  }
+
+  async function handleUploadAndParse() {
     if (!file) return;
-    setStatus("uploading");
-    setMessage("");
     try {
+      // --- Upload ---
+      setPhase("uploading");
+      setMsg("");
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch("/api/resume/upload", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "שגיאה בהעלאה");
-      setStatus("done");
-      setMessage(`עלה בהצלחה (id: ${data.id}, ${(file.size / 1024).toFixed(1)} KB)`);
-      // אם תרצה: ננקה את הבחירה
-      // setFile(null);
-      // inputRef.current?.value = "";
+      const upRes = await fetch("/api/resume/upload", { method: "POST", body: fd });
+      const upData = await upRes.json();
+      if (!upRes.ok) throw new Error(upData?.error || "שגיאה בהעלאה");
+
+      const tempId: string = upData.id;
+      setMsg(`העלאה הושלמה (id: ${tempId}). ממשיכים לניתוח…`);
+
+      // --- Parse (auto) ---
+      setPhase("parsing");
+      const parseRes = await fetch("/api/resume/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: tempId }),
+      });
+      const parseData: ParseResult = await parseRes.json();
+      if (!parseRes.ok) {
+        const err = (parseData as any)?.error || "שגיאה בניתוח";
+        throw new Error(err);
+      }
+
+      setResult(parseData);
+      setPhase("done");
+
+      // הודעת סיכום ידידותית
+      if ("status" in parseData && parseData.status === "needs_ocr") {
+        setMsg(`הקובץ נותח אך חסר טקסט (כנראה PDF סרוק). עמודים: ${parseData.pageCount}. נסמן ל־OCR בהמשך.`);
+      } else if ("ok" in parseData && parseData.ok) {
+        setMsg(`נותח בהצלחה! עמודים: ${(parseData as ParseResultOK).pageCount}, תווים: ${(parseData as ParseResultOK).chars}`);
+      } else {
+        setMsg("הניתוח הושלם.");
+      }
     } catch (e: any) {
-      setStatus("error");
-      setMessage(e?.message || "שגיאה");
+      setPhase("error");
+      setMsg(e?.message || "שגיאה");
     }
   }
 
   return (
     <div className="space-y-3">
-      {/* קלט קובץ מוחבא לגמרי, כדי לשלוט בעיצוב */}
+      {/* קלט קובץ מוחבא לשליטה בעיצוב */}
       <input
         ref={inputRef}
         id="resume-input"
@@ -91,23 +127,50 @@ export default function ResumeUpload() {
         )}
       </div>
 
-      <div className="flex items-center gap-2">
-        <Button onClick={onUpload} disabled={!file || status === "uploading"}>
-          {status === "uploading" ? "מעלה..." : "העלה קו\"ח"}
+      {/* כפתור פעולה אחד: מעלה → מנתח אוטומטית */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          onClick={handleUploadAndParse}
+          disabled={!file || phase === "uploading" || phase === "parsing"}
+        >
+          {phase === "uploading"
+            ? "מעלה…"
+            : phase === "parsing"
+            ? "מנתח…"
+            : "העלה ונתח אוטומטית"}
         </Button>
-        {message && (
+
+        {msg && (
           <span
             className={`text-sm ${
-              status === "error" ? "text-red-600" : "text-slate-700"
+              phase === "error" ? "text-red-600" : "text-slate-700"
             }`}
           >
-            {message}
+            {msg}
           </span>
         )}
       </div>
 
+      {/* תקציר תוצאה */}
+      {result && "ok" in result && result.ok && "resumeId" in result && (
+        <div className="rounded-lg border p-3 bg-white text-sm text-slate-700">
+          {"status" in result && result.status === "needs_ocr" ? (
+            <>
+              <div><b>סטטוס:</b> דרוש OCR</div>
+              <div>עמודים: {result.pageCount}</div>
+            </>
+          ) : (
+            <>
+              <div><b>תוצאה:</b> resumeId: {(result as ParseResultOK).resumeId}</div>
+              <div>עמודים: {(result as ParseResultOK).pageCount}</div>
+              <div>תווים: {(result as ParseResultOK).chars}</div>
+            </>
+          )}
+        </div>
+      )}
+
       <p className="text-xs text-slate-500">
-        טיפ: אנחנו שומרים זמנית בתיקיית Temp כדי לנתח בהמשך. בפרודקשן נעביר לאחסון ענן.
+        טיפ: אנחנו שומרים זמנית בתיקיית Temp לצורך ניתוח בלבד; אחר כך נמחק. לפרודקשן נעביר לאחסון ענן.
       </p>
     </div>
   );
