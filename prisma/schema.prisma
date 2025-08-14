@@ -64,12 +64,14 @@ model VerificationToken {
 model Resume {
   id        String   @id @default(cuid())
   user      User     @relation(fields: [userId], references: [id])
-  userId    String
+  userId    String   @unique   // ← ייחודי כדי לאפשר upsert לפי userId
   text      String
   skills    Json
   yearsExp  Int?
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt   // ← נוח למעקב
 }
+
 
 model Job {
   id             String   @id @default(cuid())
