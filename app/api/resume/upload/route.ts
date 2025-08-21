@@ -1,4 +1,4 @@
-// #region UploadRoute
+// C:\Users\itays\Desktop\33\job-ai-app\app\api\resume\upload\route.ts
 import { NextResponse } from "next/server";
 import { writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";

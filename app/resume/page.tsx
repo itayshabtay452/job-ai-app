@@ -1,4 +1,4 @@
-// #region ResumePage
+// C:\Users\itays\Desktop\33\job-ai-app\app\resume\page.tsx
 import ResumeUpload from "@/components/ResumeUpload";
 
 export default function ResumePage() {

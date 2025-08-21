@@ -1,18 +1,6 @@
+// app/api/auth/[...nextauth]/route.ts
 import NextAuth from "next-auth";
-import GitHub from "next-auth/providers/github";
-import { PrismaAdapter } from "@auth/prisma-adapter";
-import { prisma } from "@/lib/db";
+import { authOptions } from "@/lib/auth";
 
-const handler = NextAuth({
-  adapter: PrismaAdapter(prisma),
-  providers: [
-    GitHub({
-      clientId: process.env.GITHUB_ID!,
-      clientSecret: process.env.GITHUB_SECRET!,
-    }),
-  ],
-  // נשמור סשנים בבסיס הנתונים (כי יצרנו טבלת Session)
-  session: { strategy: "database" },
-});
-
+const handler = NextAuth(authOptions);
 export { handler as GET, handler as POST };
