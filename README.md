@@ -56,7 +56,7 @@ flowchart LR
     Show[/GET /api/jobs/:id/]
   end
 
-  Data[Feed JSON/CSV] -->|normalize| Ingest -->|upsert by (source,externalId)| DB[(Postgres)]
+  Data[Feed JSON/CSV] -->|normalize| Ingest -->|upsert by source+externalId| DB[(Postgres)]
   FE -.->|fetch| List --> DB
   FE -.->|fetch| Show --> DB
 
