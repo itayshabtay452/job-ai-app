@@ -1,3 +1,5 @@
+//C:\Users\itays\Desktop\33\job-ai-app\components\Navbar.tsx
+
 "use client";
 
 import Link from "next/link";

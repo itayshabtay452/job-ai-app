@@ -1,0 +1,51 @@
+[
+  {
+    "id": "A-101",
+    "company_name": "Acme Corp",
+    "job_title": "Full-Stack Developer (TypeScript)",
+    "city": "Tel Aviv",
+    "mode": "hybrid",
+    "tags": ["React", "Node.js", "Postgres"],
+    "desc": "Build features in Next.js...",
+    "apply_url": "https://example.com/jobs/A-101",
+    "_source": "mockA"
+  },
+  {
+    "uuid": "B-55",
+    "company": "Globex",
+    "title": "Backend Engineer",
+    "location": "Remote (IL)",
+    "skills": "Go,  Postgres ;  Docker, Redis",
+    "description": "Design APIs and services...",
+    "url": "https://example.com/jobs/B-55",
+    "_source": "mockB"
+  },
+  {
+    "id": "A-101",
+    "company_name": "Acme Corp",
+    "job_title": "Full-Stack Developer (Typescript) — Duplicate Title Variant",
+    "city": "Tel Aviv",
+    "tags": ["react", "React.js", " node.js  ", "Postgres "],
+    "desc": "Variant of the same posting to test upsert by externalId",
+    "apply_url": "https://example.com/jobs/A-101?v=2",
+    "_source": "mockA"
+  },
+  {
+    "uuid": "C-777",
+    "company": "Initech",
+    "title": "Data Engineer",
+    "location": "Haifa",
+    "tech_stack": ["Python", "Spark", "PostgreSQL"], 
+    "description": "ETL pipelines and data modeling",
+    "url": "https://example.com/jobs/C-777",
+    "_source": "mockC"
+  },
+  {
+    "company": "Umbrella",
+    "title": "DevOps Engineer",
+    "skills": "Kubernetes, docker , Helm,   AWS",
+    "description": "",
+    "url": "https://example.com/jobs/helm-ops",
+    "_source": "mockD"
+  }
+]

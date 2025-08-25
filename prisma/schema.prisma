@@ -76,17 +76,22 @@ model Resume {
 model Job {
   id             String   @id @default(cuid())
   source         String
+  externalId     String           // ← מזהה מהמקור (או מחושב)
   title          String
   company        String
   location       String?
   description    String
-  skillsRequired Json
+  skillsRequired String[]         // ← היה Json, עכשיו מערך טקסט
   url            String?
   createdAt      DateTime @default(now())
 
   matches        Match[]
   drafts         ApplicationDraft[]
+
+  @@unique([source, externalId])  // ← מונע כפילויות בין מקורות
+  @@index([createdAt])            // ← לעמודות לפי תאריך
 }
+
 
 model Match {
   id        String   @id @default(cuid())

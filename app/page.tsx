@@ -1,3 +1,5 @@
+//C:\Users\itays\Desktop\33\job-ai-app\app\page.tsx
+
 // #region Imports
 "use client";
 import Image from "next/image";

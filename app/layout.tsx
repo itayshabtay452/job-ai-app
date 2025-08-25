@@ -1,3 +1,5 @@
+//C:\Users\itays\Desktop\33\job-ai-app\app\layout.tsx
+
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
