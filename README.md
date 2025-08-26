@@ -1,21 +1,31 @@
-# Job AI App — README (Stage 10)
 
-> גרסת README מותאמת ל-GitHub (Markdown + Mermaid) המציגה את שתי הזרימות המרכזיות:
-> **Resume:** Upload → Parse → Analyze
-> **Jobs:** Ingest → List → Detail
-> כולל API, התקנה, משתני סביבה, מבנה תיקיות וצ’קליסט התקדמות.
+
+---
+
+# Job AI App — README (Stage 11)
+
+> גרסת README מותאמת ל-GitHub (Markdown + Mermaid).
+>
+> זרימות מרכזיות:
+>
+> * **Resume:** Upload → Parse → Analyze
+> * **Jobs:** Ingest → List → Detail
+> * **Match (Stage 11):** Job Detail → Compute Match → Persist → Show
 
 ---
 
 ## 🔭 סקירה כללית
 
-האפליקציה מטפלת בשני צירים:
+האפליקציה מטפלת בשלושה צירים:
 
 1. **קורות חיים (Resume)**
    העלאת PDF → שמירה זמנית (TMP) → חילוץ טקסט (Parse) → ניתוח AI ל-JSON מובנה → שמירה והצגה ב-UI.
 
 2. **משרות (Jobs)**
-   Ingest מפיד מדומה (ובהמשך מקורות אמיתיים) עם **נורמליזציה** ואיחוד שדות → List API עם פילטרים ודפדוף → דף פרטי משרה.
+   Ingest מפיד מדומה עם נורמליזציה ואיחוד שדות → List API עם פילטרים ודפדוף → דף פרטי משרה.
+
+3. **התאמה (Match) — Stage 11**
+   חישוב ציון התאמה בסיסי בין סקילז המועמד לדרישות המשרה, שמירה בטבלת `Match`, והצגה ב־UI.
 
 ---
 
@@ -63,37 +73,59 @@ flowchart LR
   JobsPage -->|click job| JobDetail
 ```
 
+### התאמה (Stage 11) — Job Detail → Match
+
+```mermaid
+sequenceDiagram
+  participant JD as Job Detail (/jobs/:id)
+  participant MAPI as /api/jobs/:id/match
+  participant ENG as lib/match/engine.ts
+  participant DB as Postgres
+
+  JD->>MAPI: GET /api/jobs/:id/match (withUser)
+  MAPI->>DB: findUnique(Job), findUnique(Resume by userId)
+  MAPI->>ENG: computeMatch({ candidateSkills, jobSkills })
+  ENG-->>MAPI: { score, reasons, breakdown }
+  MAPI->>DB: findFirst(Match) ? update : create
+  MAPI-->>JD: { ok, score, reasons, breakdown }
+  JD-->>JD: Render JobMatchPanel (score, coverage, matched/missing)
+```
+
 ---
 
 ## 🧱 סכמת נתונים (Prisma)
 
-### Resume (Stage 9)
+### Resume
 
-* `text: String` — טקסט מלא מה-PDF
-* `skills: Json` — אובייקט מובנה מה-AI `{ skills[], tools[], dbs[], years, highlights[] }`
-* `yearsExp: Int?` — עיגול/נרמול של years
+* `text: String`
+* `skills: Json` — יכול להיות מערך (`string[]`) או אובייקט עם `{ skills[], tools[], dbs[] }`
+* `yearsExp: Int?`
 * `userId: String @unique` — **רשומה אחת לכל משתמש**
 * `updatedAt @updatedAt`
 
-### Job (Stage 10 — עדכונים חשובים)
+### Job
 
-* `source: String` — מזהה מקור (למשל mockA/mockB/…)
-* `externalId: String` — מזהה חיצוני ייחודי בתוך המקור
-* `title: String`, `company: String`, `location: String?`, `description: String`, `url: String?`
-* `skillsRequired: String[]` — **מערך מחרוזות (lowercase)** לנורמליזציה/פילטור יעיל
-* `createdAt: DateTime @default(now())`
+* `source, externalId, title, company, location?, description, url?`
+* `skillsRequired: String[]` — **lowercase**
+* `createdAt`
 * אינדקסים/ייחודיות:
 
-  * `@@unique([source, externalId])` — מניעת כפילויות בין מקורות
-  * `@@index([createdAt])` — מיון אחרון-קודם מהיר
+  * `@@unique([source, externalId])`
+  * `@@index([createdAt])`
 
-> מודלים נוספים קיימים: NextAuth (User/Account/Session/VerificationToken) + Match, ApplicationDraft (לשלבים הבאים).
+### Match (בשימוש Stage 11)
+
+* `userId: String`, `jobId: String`
+* `score: Float`, `reasons: Json` (בפועל `string[]`)
+* `createdAt: DateTime @default(now())`
+
+> 💡 **בונוס מומלץ (לא חובה בשלב 11):** הוספת `@@unique([userId, jobId])` למניעת כפילויות ו־`upsert` אטומי.
 
 ---
 
 ## 🔐 אימות גלובלי
 
-`lib/auth.ts` מספק `authOptions`, `auth()`, `requireUser()`, ו-`withUser(handler)`.
+`lib/auth.ts` מספק `authOptions`, `auth()`, `requireUser()`, ו־`withUser(handler)`.
 
 דוגמה (NextAuth API):
 
@@ -105,126 +137,122 @@ const handler = NextAuth(authOptions);
 export { handler as GET, handler as POST };
 ```
 
-> ה-ingest מוגן ע"י `withUser` (דרושה התחברות). ה-list/detail ציבוריים לקריאה.
+> ב־Stage 11, `/api/jobs/:id/match` מוגן ע״י `withUser` (דורש התחברות).
+> שאר API המשרות (list/detail) ציבוריים לקריאה.
 
 ---
 
 ## 🧪 API
 
-### 1) `POST /api/resume/upload`
+### (תזכורת Stage 9–10)
 
-* **קלט:** `multipart/form-data` → שדה `file` (PDF ≤ 5MB)
-* **ולידציה:** סיומת `.pdf`, חתימת `%PDF`
-* **פעולה:** שמירה זמנית ל-TMP (`resume-<id>.pdf`)
-* **פלט:** `200 { ok, id, bytes }`
+1. `POST /api/resume/upload`
+2. `POST /api/resume/parse`
+3. `POST /api/resume/analyze`
+4. `POST /api/jobs/ingest` *(מוגן)*
+5. `GET /api/jobs/list`
+6. `GET /api/jobs/:id`
 
-```bash
-curl -X POST \
-  -F "file=@/path/to/resume.pdf;type=application/pdf" \
-  http://localhost:3000/api/resume/upload
-```
+---
 
-### 2) `POST /api/resume/parse`
+### 7) `GET /api/jobs/:id/match`  *(Stage 11)*
 
-* **קלט:** JSON `{ id }`
-* **פעולה:** קריאת PDF זמני → `pdf-parse` → שמירה ל-DB (`upsert` לפי `userId`)
-* **פלט:**
+**מטרה:** לחשב ציון התאמה בין המועמד לבין משרה, לשמור ל־DB, ולהחזיר תוצאה ל־UI.
 
-  * `200 { ok, resumeId, pageCount, chars }`
-  * או `200 { ok, id, status:"needs_ocr", pageCount }`
+* **אבטחה:** מוגן ע״י `withUser` → לא מחובר ⇒ `401`.
+* **תלות:** `Resume` של המשתמש עם `skills` ו־`Job.skillsRequired`.
 
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"id":"<tmp-id>"}' http://localhost:3000/api/resume/parse
-```
-
-### 3) `POST /api/resume/analyze`
-
-* **קלט:** ללא גוף (מבוסס על `Resume.text` של המשתמש)
-* **פעולה:** קריאה ל-OpenAI עם JSON Schema strict
-* **פלט:** `200 { ok, resumeId, profile, yearsExp }`
-
-דוגמת פלט:
+**פלט תקין (200):**
 
 ```json
 {
-  "profile": {
-    "skills": ["typescript","react","next.js"],
-    "tools": ["git","docker"],
-    "dbs": ["postgres","mongodb"],
-    "years": 2.5,
-    "highlights": ["built full-stack features", "optimized queries"]
+  "ok": true,
+  "score": 75,
+  "reasons": ["התאמה: react, typescript", "חסרים: node"],
+  "breakdown": {
+    "matched": ["react","typescript"],
+    "missing": ["node"],
+    "extra": ["postgresql","git"],
+    "coverage": 0.67
   }
 }
 ```
 
+**שגיאות:**
+
+* `401 { "error": "unauthorized" }` — לא מחובר (נוצר ע״י withUser).
+* `404 { ok:false, error:"JOB_NOT_FOUND" }` — משרה לא קיימת.
+* `422 { ok:false, error:"NO_RESUME" }` — אין `Resume` למשתמש.
+* `422 { ok:false, error:"NO_CANDIDATE_SKILLS" }` — אין סקילז ב־Resume.
+
+**דוגמאות:**
+
+```bash
+# תקין (מחובר)
+curl -i "http://localhost:3000/api/jobs/<JOB_ID>/match"
+
+# 404 — מזהה לא קיים
+curl -i "http://localhost:3000/api/jobs/does-not-exist/match"
+
+# 422 — אין Resume
+# (ניתן לסמלץ ע"י מחיקת הרשומה ב-Prisma Studio)
+curl -i "http://localhost:3000/api/jobs/<JOB_ID>/match"
+```
+
+> ❗ נפוץ לטעות בין נתיבי דף ל־API:
+> **נכון:** `/api/jobs/<id>/match`
+> **לא נכון:** `/jobs/<id>/match` (זה דף ולא קיים)
+
 ---
 
-### 4) `POST /api/jobs/ingest`  *(Stage 10)*
+## 🧠 מנוע התאמה (Stage 11)
 
-* **קלט:** (dev) משתמש בפיד דמה (`data/jobs-feed.json`)
-* **פעולה:**
+**קובץ:** `lib/match/engine.ts` — פונקציה טהורה ללא IO.
 
-  * **נורמליזציה** לשדות אחידים (טיפול בכתיב/רווחים/רישיות, המרת skills ל-lowercase ודילול כפילויות)
-  * **upsert** לפי `(source, externalId)` (**אידמפוטנטי**)
-* **פלט:** `200 { ok, total, created, updated, skipped }`
-* **אבטחה:** דורש התחברות (`withUser`)
+* **קלט:**
+  `candidateSkills: string[]`, `jobSkills: string[]`
+  (תמיכה עתידית: `candidateYears?`, `jobLocation?`)
 
-```bash
-curl -X POST http://localhost:3000/api/jobs/ingest
-```
+* **לוגיקה (v1):**
 
-### 5) `GET /api/jobs/list`  *(Stage 10)*
+  * נירמול: lowercase + trim + הסרת כפילויות.
+  * אין דרישות במשרה → **score 50**, `coverage = null`.
+  * אין סקילז למועמד → **score 0**.
+  * אחרת: `coverage = |matched| / |jobSkills|` → `score = round(coverage*100)`.
+  * מחזיר גם `reasons` + `breakdown { matched, missing, extra, coverage }`.
 
-* **פרמטרים:**
+* **בדיקות יחידה (smoke):**
+  `scripts/test-match.ts`
 
-  * `q` — חיפוש חופשי ב-`title/company/location/description` (case-insensitive)
-  * `location` — פילטר מיקום (`contains`)
-  * `skill` — פילטר לפי סקיל מתוך `skillsRequired` (lowercase)
-  * `page` (ברירת מחדל 1), `pageSize` (ברירת מחדל 20, מקס' 50)
-* **פלט:**
-  `200 { ok, total, page, pageSize, items: [{ id, title, company, location, skillsRequired, url, createdAt }] }`
-
-דוגמאות:
-
-```bash
-# כל המשרות (דף 1)
-curl "http://localhost:3000/api/jobs/list"
-
-# חיפוש חופשי
-curl "http://localhost:3000/api/jobs/list?q=engineer"
-
-# פילטר מיקום
-curl "http://localhost:3000/api/jobs/list?location=tel%20aviv"
-
-# פילטר סקיל (שמור lowercase)
-curl "http://localhost:3000/api/jobs/list?skill=react"
-
-# עמוד 2, גודל 10
-curl "http://localhost:3000/api/jobs/list?page=2&pageSize=10"
-```
-
-### 6) `GET /api/jobs/[id]`  *(Stage 10)*
-
-* **קלט:** `id` כמקטע URL
-* **פעולה:** שליפת משרה
-* **פלט:** `200 { ok, job:{ ... } }` או `404 { error:"not found" }`
+  ```bash
+  npx tsx scripts/test-match.ts
+  ```
 
 ---
 
 ## 🖥️ UI
 
-### ResumeUpload (Stage 9)
-
-* שלבים: `uploading → parsing → analyzing → done/error`
-* אוטומציה מלאה: לאחר Upload קורא ל-Parse; אם תקין—ממשיך ל-Analyze; מציג את הפרופיל המובנה.
-
 ### Jobs (Stage 10)
 
-* **`/jobs`** — עמוד רשימת המשרות:
-  פילטרים (`q / location / skill`), דפדוף (`page/pageSize`), טעינה מ-`/api/jobs/list`, כרטיס לכל משרה עם תגיות skills וקישור חיצוני (אם קיים). לחיצה על **כותרת המשרה** → ניווט לדף פרטים.
-* **`/jobs/[id]`** — דף פרטי משרה:
-  שליפה ישירה מ-DB (Server Component), מציג מקור, `externalId`, תיאור ו-skills, וקישור חיצוני למשרה (אם קיים).
+* **`/jobs`** — רשימת משרות עם פילטרים (`q/location/skill`) ודפדוף.
+* **`/jobs/:id`** — דף פרטי משרה (Server Component): מציג מקור, `externalId`, תיאור, `skillsRequired`, וקישור למקור.
+
+### Match Panel (Stage 11)
+
+* **קומפוננטה:** `components/JobMatchPanel.tsx` *(Client, עם `"use client"`)*
+
+  * בעת הטענה שולחת `GET /api/jobs/:id/match`.
+  * מציגה ציון, כיסוי, רשימות matched/missing, ו־reasons.
+  * כפתור “רענן” לשמישות מהירה לאחר שינוי קו״ח.
+
+* **חיבור לדף המשרה:** `app/jobs/[id]/page.tsx`
+  ייבוא ישיר (ללא `next/dynamic`) — App Router יודע “לתחום” Client Component:
+
+  ```tsx
+  import JobMatchPanel from "@/components/JobMatchPanel";
+  ...
+  <JobMatchPanel jobId={job.id} />
+  ```
 
 ---
 
@@ -249,7 +277,7 @@ GITHUB_SECRET=...
 OPENAI_API_KEY=sk-...   # שרת בלבד
 ```
 
-> **חשוב:** אל תדחוף `.env/.env.local` לריפו. שמור טמפלייט נקי ב-`.env.local.example`.
+> **חשוב:** אל תדחוף `.env/.env.local` לריפו. שמור טמפלייט נקי ב־`.env.local.example`.
 
 ---
 
@@ -264,66 +292,80 @@ app/
       parse/route.ts
       analyze/route.ts
     jobs/
-      ingest/route.ts        # Stage 10
-      list/route.ts          # Stage 10
-      [id]/route.ts          # Stage 10
+      ingest/route.ts
+      list/route.ts
+      [id]/route.ts
+      [id]/match/route.ts        # ← Stage 11
   jobs/
-    page.tsx                 # Stage 10 (UI רשימה + פילטרים)
-    [id]/page.tsx            # Stage 10 (UI פרטים)
+    page.tsx
+    [id]/page.tsx                # ← כולל <JobMatchPanel jobId={job.id} />
 
 components/
   ResumeUpload.tsx
-  JobsFilters.tsx            # Stage 10
+  JobsFilters.tsx
+  JobMatchPanel.tsx              # ← Stage 11 (Client)
 
 lib/
   auth.ts
   db.ts
-  jobs/                      # Stage 10 (normalizers)
+  jobs/
+    ...                          # נורמליזציה ל-ingest
+  match/
+    engine.ts                    # ← Stage 11
+
+scripts/
+  test-match.ts                  # ← Stage 11 (בדיקות מנוע)
 
 data/
-  jobs-feed.json             # Stage 10 (פיד דמה)
+  jobs-feed.json
 
 prisma/
   schema.prisma
   migrations/
-
-types/
-  pdf-parse.d.ts
 ```
 
 ---
 
 ## 🧰 תקלות ופתרונות מהירים
 
-* **`/jobs` ריק** → כנראה לא הרצתי ingest.
-  הרץ `POST /api/jobs/ingest` (כשאתה מחובר). לאחר מכן `/jobs` יציג הכל.
-* **פילטר `skill` לא מחזיר תוצאות** → ודא שהפרמטר lowercase (למשל `react`).
-* **401 ב-`/api/jobs/ingest`** → דרושה התחברות (NextAuth).
-* **פרפורמנס חיפוש חופשי** → לנתונים קטנים זה בסדר. בהמשך: pg\_trgm/FTS.
-* **pdf-parse ENOENT** → ייבוא מ-subpath: `pdf-parse/lib/pdf-parse.js`.
-* **אין שכבת טקסט ב-PDF** → `needs_ocr` (שלב OCR עתידי).
+* **פתחתי `/jobs/:id/match` וקיבלתי 404**
+  זה נתיב דף. ה־API נמצא ב־`/api/jobs/:id/match`.
+
+* **ב־`/jobs/:id` קיבלתי שגיאת dynamic/SSR**
+  אל תשתמש ב־`next/dynamic({ ssr:false })` ב־Server Component.
+  יבוא ישיר של Client Component מספיק.
+
+* **401 ב־`/api/jobs/:id/match`**
+  זה הגיוני — הנתיב מוגן עם `withUser`. התחבר דרך GitHub.
+
+* **422 `NO_RESUME`/`NO_CANDIDATE_SKILLS`**
+  ודא שיש רשומת `Resume` וש־`skills` לא ריק (רץ `Analyze` או עדכן ב-Prisma Studio).
+
+* **Match לא מתעדכן**
+  בדוק ב־Prisma Studio. ב־Stage 11 אנו עושים `findFirst→update/create`.
+  לביטחון אטומי מול מרוצים — הוסף `@@unique([userId, jobId])` ועבור ל־`upsert`.
 
 ---
 
-## ✅ צ’קליסט Stage 10
+## ✅ צ’קליסט Stage 11
 
-* [x] נורמליזציית פיד משרות לאחידות שדות
-* [x] `upsert` לפי `(source, externalId)` — אידמפוטנטי
-* [x] שינוי `Job.skillsRequired` ל-`String[]` (lowercase)
-* [x] `GET /api/jobs/list` עם פילטרים + דפדוף
-* [x] `/jobs` — UI רשימה עם פילטרים/דפדוף
-* [x] `GET /api/jobs/[id]` + `/jobs/[id]` — דף פרטי משרה
+* [x] **Engine (V1):** `lib/match/engine.ts` — חישוב לפי כיסוי סקילז + `reasons`/`breakdown`
+* [x] **API:** `GET /api/jobs/:id/match` (מוגן `withUser`) — שליפת Job+Resume, חישוב, Persist ל־`Match`
+* [x] **UI:** `JobMatchPanel` (Client) + שילוב ב־`/jobs/:id`
+* [x] **בדיקות:**
+
+  * מנוע: `npx tsx scripts/test-match.ts`
+  * ידניות: 200/401/404/422 + בדיקת עדכון ב־Prisma Studio
+* [x] **Git:** קומיט מסכם (ללא `.env`)
 
 ---
 
 ## 🔜 המשך דרך
 
-* **Stage 11:** מנוע התאמה (Match Engine v1) — ציון לפי כיסוי סקילז + “סיבות” (הסברים)
-* **Stage 11.1:** הוספת ניסיון/מיקום לשקלול
-* OCR ל-PDF סרוקים (Tesseract/Cloud Vision)
-* Queue/Worker ל-PDF כבדים
-* Ajv Validation ל-Schema בצד שרת
-* דשבורד להצגת פרופיל ושיפור הפרומפט
+* **Stage 11.1:** משקולים לניסיון (`candidateYears`) ולמיקום (`jobLocation`) במשקל כולל.
+* **DB יציבות:** הוסף `@@unique([userId, jobId])` ל־`Match` והחלף ל־`upsert`.
+* **UI רשימות:** פילטר “הצג ≥ 70” בעמוד `/jobs`.
+* OCR ל-PDF סרוקים, Queue/Worker ל-PDF כבדים, Ajv Validation ל-Schemas, דשבורד פרופיל.
 
 ---
 
