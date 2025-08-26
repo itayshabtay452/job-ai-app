@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import JobMatchPanel from "@/components/JobMatchPanel"; // ← ייבוא רגיל של Client Component
+import CoverLetterEditor from "@/components/CoverLetterEditor"; // ← חדש
 
 // נשאיר את המטא-דאטה של Next:
 export const dynamic = "force-dynamic";
@@ -73,6 +74,7 @@ export default async function JobDetailPage({
 
       {/* פנל ציון התאמה (Client) */}
       <JobMatchPanel jobId={job.id} />
+      <CoverLetterEditor jobId={job.id} maxWords={220} />
     </main>
   );
 }
