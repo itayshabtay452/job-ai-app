@@ -148,3 +148,56 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     });
   })(req);
 }
+
+
+// PUT — עדכון טיוטה ידני אחרי עריכה
+export async function PUT(req: Request, ctx: { params: { id: string } }) {
+  const jobId = ctx.params.id;
+
+  return withUser(async (_req, { user }) => {
+    // 1) קריאת גוף ובדיקות בסיס
+    const body = await req.json().catch(() => ({}));
+    const coverLetter: string = typeof body?.coverLetter === "string" ? body.coverLetter.trim() : "";
+
+    if (!coverLetter) {
+      return NextResponse.json({ ok: false, error: "EMPTY_CONTENT" }, { status: 422 });
+    }
+    // תקרת-בטיחות: מקסימום 400 מילים בעדכון ידני
+    const wordCount = (coverLetter.split(/\s+/).filter(Boolean)).length;
+    if (wordCount > 400) {
+      return NextResponse.json({ ok: false, error: "OVER_WORD_LIMIT" }, { status: 422 });
+    }
+
+    // 2) ודא שהמשרה קיימת
+    const job = await getJobOr404(jobId);
+    if (!job) {
+      return NextResponse.json({ ok: false, error: "JOB_NOT_FOUND" }, { status: 404 });
+    }
+
+    // 3) Persist לפי (userId, jobId): עדכון אם קיים, אחרת יצירה
+    const existing = await prisma.applicationDraft.findFirst({
+      where: { userId: user.id, jobId: job.id },
+      select: { id: true },
+    });
+
+    let draftId: string;
+    if (existing) {
+      const updated = await prisma.applicationDraft.update({
+        where: { id: existing.id },
+        data: { coverLetter },
+        select: { id: true },
+      });
+      draftId = updated.id;
+    } else {
+      const created = await prisma.applicationDraft.create({
+        data: { userId: user.id, jobId: job.id, coverLetter },
+        select: { id: true },
+      });
+      draftId = created.id;
+    }
+
+    // 4) תשובה
+    return NextResponse.json({ ok: true, draft: { id: draftId } });
+  })(req);
+}
+
