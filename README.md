@@ -1,8 +1,8 @@
-
+להלן **README מעודכן ל–Stage 12** (מוכן להדבקה ב-GitHub: Markdown + Mermaid).
 
 ---
 
-# Job AI App — README (Stage 11)
+# Job AI App — README (Stage 12)
 
 > גרסת README מותאמת ל-GitHub (Markdown + Mermaid).
 >
@@ -11,12 +11,13 @@
 > * **Resume:** Upload → Parse → Analyze
 > * **Jobs:** Ingest → List → Detail
 > * **Match (Stage 11):** Job Detail → Compute Match → Persist → Show
+> * **Cover Letter (Stage 12):** Job Detail → Generate (AI) / Edit → Save Draft
 
 ---
 
 ## 🔭 סקירה כללית
 
-האפליקציה מטפלת בשלושה צירים:
+האפליקציה מטפלת בשלושה צירים עיקריים + כתיבת מכתב פנייה:
 
 1. **קורות חיים (Resume)**
    העלאת PDF → שמירה זמנית (TMP) → חילוץ טקסט (Parse) → ניתוח AI ל-JSON מובנה → שמירה והצגה ב-UI.
@@ -26,6 +27,9 @@
 
 3. **התאמה (Match) — Stage 11**
    חישוב ציון התאמה בסיסי בין סקילז המועמד לדרישות המשרה, שמירה בטבלת `Match`, והצגה ב־UI.
+
+4. **מכתב פנייה (Cover Letter) — Stage 12**
+   פרומפט אחיד ל-AI (טון ענייני, מגבלת מילים, הזרקת פרויקטים/Highlights), יצירה/עריכה/שמירה כ-Draft בטבלת `ApplicationDraft`, UI לעריכה ושמירה.
 
 ---
 
@@ -88,7 +92,34 @@ sequenceDiagram
   ENG-->>MAPI: { score, reasons, breakdown }
   MAPI->>DB: findFirst(Match) ? update : create
   MAPI-->>JD: { ok, score, reasons, breakdown }
-  JD-->>JD: Render JobMatchPanel (score, coverage, matched/missing)
+  JD-->>JD: Render JobMatchPanel
+```
+
+### מכתב פנייה (Stage 12) — Generate / Edit / Save
+
+```mermaid
+sequenceDiagram
+  participant JD as Job Detail (/jobs/:id)
+  participant CLAPI as /api/jobs/:id/cover-letter
+  participant PR as lib/cover-letter/prompt.ts
+  participant OAI as OpenAI API
+  participant DB as Postgres
+
+  JD->>CLAPI: GET (load existing draft) (withUser)
+  CLAPI->>DB: findFirst(ApplicationDraft by userId+jobId)
+  CLAPI-->>JD: { ok, draft|null }
+
+  JD->>CLAPI: POST (generate with AI) { maxWords? } (withUser)
+  CLAPI->>DB: findUnique(Job), findUnique(Resume)
+  CLAPI->>PR: buildCoverLetterPrompt(job,resume,maxWords)
+  CLAPI->>OAI: chat.completions.create(messages)
+  OAI-->>CLAPI: content
+  CLAPI->>DB: update/create ApplicationDraft
+  CLAPI-->>JD: { ok, draft:{ id, coverLetter } }
+
+  JD->>CLAPI: PUT (manual save) { coverLetter } (withUser)
+  CLAPI->>DB: update/create ApplicationDraft
+  CLAPI-->>JD: { ok:true }
 ```
 
 ---
@@ -98,7 +129,7 @@ sequenceDiagram
 ### Resume
 
 * `text: String`
-* `skills: Json` — יכול להיות מערך (`string[]`) או אובייקט עם `{ skills[], tools[], dbs[] }`
+* `skills: Json` — יכול להיות מערך (`string[]`) או אובייקט עם `{ skills[], tools[], dbs[], highlights[]? }`
 * `yearsExp: Int?`
 * `userId: String @unique` — **רשומה אחת לכל משתמש**
 * `updatedAt @updatedAt`
@@ -113,13 +144,19 @@ sequenceDiagram
   * `@@unique([source, externalId])`
   * `@@index([createdAt])`
 
-### Match (בשימוש Stage 11)
+### Match (Stage 11)
 
 * `userId: String`, `jobId: String`
 * `score: Float`, `reasons: Json` (בפועל `string[]`)
 * `createdAt: DateTime @default(now())`
 
-> 💡 **בונוס מומלץ (לא חובה בשלב 11):** הוספת `@@unique([userId, jobId])` למניעת כפילויות ו־`upsert` אטומי.
+### ApplicationDraft (Stage 12)
+
+* `userId: String`, `jobId: String`
+* `coverLetter: String`
+* `createdAt`, `updatedAt`
+
+> 💡 **בונוס מומלץ:** הוסף `@@unique([userId, jobId])` ל-`ApplicationDraft` ועבור ל-`upsert` אטומי.
 
 ---
 
@@ -137,14 +174,13 @@ const handler = NextAuth(authOptions);
 export { handler as GET, handler as POST };
 ```
 
-> ב־Stage 11, `/api/jobs/:id/match` מוגן ע״י `withUser` (דורש התחברות).
-> שאר API המשרות (list/detail) ציבוריים לקריאה.
+> נתיבי Stage 12 (`/api/jobs/:id/cover-letter`) מוגנים ע״י `withUser` (דורש התחברות).
 
 ---
 
 ## 🧪 API
 
-### (תזכורת Stage 9–10)
+### תזכורת Stage 9–11
 
 1. `POST /api/resume/upload`
 2. `POST /api/resume/parse`
@@ -152,107 +188,134 @@ export { handler as GET, handler as POST };
 4. `POST /api/jobs/ingest` *(מוגן)*
 5. `GET /api/jobs/list`
 6. `GET /api/jobs/:id`
+7. `GET /api/jobs/:id/match` *(Stage 11)*
 
 ---
 
-### 7) `GET /api/jobs/:id/match`  *(Stage 11)*
+### 8) `GET /api/jobs/:id/cover-letter` *(Stage 12)*
 
-**מטרה:** לחשב ציון התאמה בין המועמד לבין משרה, לשמור ל־DB, ולהחזיר תוצאה ל־UI.
+**מטרה:** שליפת טיוטת מכתב קיימת (אם יש) עבור המשתמש המחובר.
+**אבטחה:** `withUser` → 401 אם לא מחובר.
+**שגיאות:** 404 `JOB_NOT_FOUND`.
 
-* **אבטחה:** מוגן ע״י `withUser` → לא מחובר ⇒ `401`.
-* **תלות:** `Resume` של המשתמש עם `skills` ו־`Job.skillsRequired`.
-
-**פלט תקין (200):**
+**פלט:**
 
 ```json
-{
-  "ok": true,
-  "score": 75,
-  "reasons": ["התאמה: react, typescript", "חסרים: node"],
-  "breakdown": {
-    "matched": ["react","typescript"],
-    "missing": ["node"],
-    "extra": ["postgresql","git"],
-    "coverage": 0.67
-  }
-}
+{ "ok": true, "draft": null }
 ```
 
+או
+
+```json
+{ "ok": true, "draft": { "id": "…", "coverLetter": "…", "updatedAt": "…" } }
+```
+
+### 9) `POST /api/jobs/:id/cover-letter` *(Stage 12)*
+
+**מטרה:** יצירת מכתב בעזרת AI ושמירתו כ-Draft.
+**קלט (אופציונלי):**
+
+```json
+{ "maxWords": 220 }  // טווח 80..400, ברירת מחדל 220
+```
+
+**תהליך:** טוען Job+Resume → בונה פרומפט → OpenAI (`gpt-4o-mini`) → בדיקת מגבלת מילים → persist (`ApplicationDraft`).
 **שגיאות:**
 
-* `401 { "error": "unauthorized" }` — לא מחובר (נוצר ע״י withUser).
-* `404 { ok:false, error:"JOB_NOT_FOUND" }` — משרה לא קיימת.
-* `422 { ok:false, error:"NO_RESUME" }` — אין `Resume` למשתמש.
-* `422 { ok:false, error:"NO_CANDIDATE_SKILLS" }` — אין סקילז ב־Resume.
+* 401 (לא מחובר), 404 (`JOB_NOT_FOUND`),
+* 422 (`NO_RESUME` / `OVER_WORD_LIMIT`),
+* 500 (`MISSING_OPENAI_KEY` / `EMPTY_COMPLETION`).
 
-**דוגמאות:**
+**פלט תקין:**
 
-```bash
-# תקין (מחובר)
-curl -i "http://localhost:3000/api/jobs/<JOB_ID>/match"
-
-# 404 — מזהה לא קיים
-curl -i "http://localhost:3000/api/jobs/does-not-exist/match"
-
-# 422 — אין Resume
-# (ניתן לסמלץ ע"י מחיקת הרשומה ב-Prisma Studio)
-curl -i "http://localhost:3000/api/jobs/<JOB_ID>/match"
+```json
+{ "ok": true, "draft": { "id": "…", "coverLetter": "…", "maxWords": 220 } }
 ```
 
-> ❗ נפוץ לטעות בין נתיבי דף ל־API:
-> **נכון:** `/api/jobs/<id>/match`
-> **לא נכון:** `/jobs/<id>/match` (זה דף ולא קיים)
+### 10) `PUT /api/jobs/:id/cover-letter` *(Stage 12)*
+
+**מטרה:** עדכון ידני של הטקסט ושמירה כ-Draft.
+**קלט:**
+
+```json
+{ "coverLetter": "טקסט מעודכן..." }
+```
+
+**ולידציה:** תוכן לא ריק; תקרת בטיחות 400 מילים.
+**שגיאות:** 401, 404 `JOB_NOT_FOUND`, 422 `EMPTY_CONTENT`/`OVER_WORD_LIMIT`.
+**פלט:**
+
+```json
+{ "ok": true, "draft": { "id": "…" } }
+```
+
+**דוגמאות curl (תקין):**
+
+```bash
+# GET draft
+curl "http://localhost:3000/api/jobs/<JOB_ID>/cover-letter"
+
+# POST generate
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"maxWords":220}' \
+  "http://localhost:3000/api/jobs/<JOB_ID>/cover-letter"
+
+# PUT save
+curl -X PUT -H "Content-Type: application/json" \
+  -d '{"coverLetter":"Short edited paragraph..."}' \
+  "http://localhost:3000/api/jobs/<JOB_ID>/cover-letter"
+```
+
+> ❗ שים לב לנתיב: זה **API** ב־`/api/jobs/<id>/cover-letter` (לא דף `/jobs/<id>/cover-letter`).
 
 ---
 
-## 🧠 מנוע התאמה (Stage 11)
+## 🧠 ספריית פרומפטים (Stage 12)
 
-**קובץ:** `lib/match/engine.ts` — פונקציה טהורה ללא IO.
+**קובץ:** `lib/cover-letter/prompt.ts`
 
-* **קלט:**
-  `candidateSkills: string[]`, `jobSkills: string[]`
-  (תמיכה עתידית: `candidateYears?`, `jobLocation?`)
+* `extractResumeProfile(skillsJson)` — תומך במערך או אובייקט `{ skills, tools, dbs, highlights? }`.
+* `detectLanguageFromJob(job)` — זיהוי אוטומטי: עברית אם קיימים תווי עברית בתיאור, אחרת אנגלית.
+* `buildCoverLetterPrompt({ job, resume, maxWords, language? })` — מחזיר `{ messages, language, maxWords }`:
 
-* **לוגיקה (v1):**
+  * טון ענייני ומקצועי, ללא “פלף”.
+  * מגבלת מילים קשיחה 80–400 (ברירת מחדל 220).
+  * שילוב 2–3 סקילז רלוונטיים, ו-Highlight אם קיים.
 
-  * נירמול: lowercase + trim + הסרת כפילויות.
-  * אין דרישות במשרה → **score 50**, `coverage = null`.
-  * אין סקילז למועמד → **score 0**.
-  * אחרת: `coverage = |matched| / |jobSkills|` → `score = round(coverage*100)`.
-  * מחזיר גם `reasons` + `breakdown { matched, missing, extra, coverage }`.
+**בדיקות Smoke:** `scripts/test-cover-prompt.ts`
 
-* **בדיקות יחידה (smoke):**
-  `scripts/test-match.ts`
-
-  ```bash
-  npx tsx scripts/test-match.ts
-  ```
+```bash
+npx tsx scripts/test-cover-prompt.ts
+```
 
 ---
 
 ## 🖥️ UI
 
-### Jobs (Stage 10)
-
-* **`/jobs`** — רשימת משרות עם פילטרים (`q/location/skill`) ודפדוף.
-* **`/jobs/:id`** — דף פרטי משרה (Server Component): מציג מקור, `externalId`, תיאור, `skillsRequired`, וקישור למקור.
-
 ### Match Panel (Stage 11)
 
-* **קומפוננטה:** `components/JobMatchPanel.tsx` *(Client, עם `"use client"`)*
+* `components/JobMatchPanel.tsx` (Client) — מציג ציון התאמה ו-breakdown.
 
-  * בעת הטענה שולחת `GET /api/jobs/:id/match`.
-  * מציגה ציון, כיסוי, רשימות matched/missing, ו־reasons.
-  * כפתור “רענן” לשמישות מהירה לאחר שינוי קו״ח.
+### Cover Letter Editor (Stage 12)
 
-* **חיבור לדף המשרה:** `app/jobs/[id]/page.tsx`
-  ייבוא ישיר (ללא `next/dynamic`) — App Router יודע “לתחום” Client Component:
+* **קומפוננטה:** `components/CoverLetterEditor.tsx` *(Client, עם `"use client"`)*
+
+  * טוען טיוטה (`GET`), מייצר (`POST`), שומר (`PUT`).
+  * מונה מילים + מגבלת מילים (ברירת מחדל 220).
+  * הודעות שגיאה/מצב ידידותיות.
+
+* **שילוב בעמוד המשרה:** `app/jobs/[id]/page.tsx`
 
   ```tsx
   import JobMatchPanel from "@/components/JobMatchPanel";
-  ...
+  import CoverLetterEditor from "@/components/CoverLetterEditor";
+
+  // ...
   <JobMatchPanel jobId={job.id} />
+  <CoverLetterEditor jobId={job.id} maxWords={220} />
   ```
+
+> אין להשתמש ב-`next/dynamic({ ssr:false })` בתוך Server Component. ייבוא ישיר של קומפוננטת Client מספיק — App Router יוצר גבול אוטומטי.
 
 ---
 
@@ -274,7 +337,7 @@ NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=...
 GITHUB_ID=...
 GITHUB_SECRET=...
-OPENAI_API_KEY=sk-...   # שרת בלבד
+OPENAI_API_KEY=sk-...   # נדרש ל-POST cover-letter (שרת בלבד)
 ```
 
 > **חשוב:** אל תדחוף `.env/.env.local` לריפו. שמור טמפלייט נקי ב־`.env.local.example`.
@@ -295,26 +358,31 @@ app/
       ingest/route.ts
       list/route.ts
       [id]/route.ts
-      [id]/match/route.ts        # ← Stage 11
+      [id]/match/route.ts               # Stage 11
+      [id]/cover-letter/route.ts        # Stage 12 (GET/POST/PUT)
   jobs/
     page.tsx
-    [id]/page.tsx                # ← כולל <JobMatchPanel jobId={job.id} />
+    [id]/page.tsx                       # כולל <JobMatchPanel /> ו-<CoverLetterEditor />
 
 components/
   ResumeUpload.tsx
   JobsFilters.tsx
-  JobMatchPanel.tsx              # ← Stage 11 (Client)
+  JobMatchPanel.tsx                     # Stage 11
+  CoverLetterEditor.tsx                 # Stage 12
 
 lib/
   auth.ts
   db.ts
   jobs/
-    ...                          # נורמליזציה ל-ingest
+    ...                                 # נורמליזציה ל-ingest
   match/
-    engine.ts                    # ← Stage 11
+    engine.ts                           # Stage 11
+  cover-letter/
+    prompt.ts                           # Stage 12
 
 scripts/
-  test-match.ts                  # ← Stage 11 (בדיקות מנוע)
+  test-match.ts                         # Stage 11
+  test-cover-prompt.ts                  # Stage 12
 
 data/
   jobs-feed.json
@@ -328,44 +396,36 @@ prisma/
 
 ## 🧰 תקלות ופתרונות מהירים
 
-* **פתחתי `/jobs/:id/match` וקיבלתי 404**
-  זה נתיב דף. ה־API נמצא ב־`/api/jobs/:id/match`.
-
-* **ב־`/jobs/:id` קיבלתי שגיאת dynamic/SSR**
-  אל תשתמש ב־`next/dynamic({ ssr:false })` ב־Server Component.
-  יבוא ישיר של Client Component מספיק.
-
-* **401 ב־`/api/jobs/:id/match`**
-  זה הגיוני — הנתיב מוגן עם `withUser`. התחבר דרך GitHub.
-
-* **422 `NO_RESUME`/`NO_CANDIDATE_SKILLS`**
-  ודא שיש רשומת `Resume` וש־`skills` לא ריק (רץ `Analyze` או עדכן ב-Prisma Studio).
-
-* **Match לא מתעדכן**
-  בדוק ב־Prisma Studio. ב־Stage 11 אנו עושים `findFirst→update/create`.
-  לביטחון אטומי מול מרוצים — הוסף `@@unique([userId, jobId])` ועבור ל־`upsert`.
+* **401 על cover-letter** — הנתיבים מוגנים ב־`withUser`; התחבר (GitHub).
+* **404 `JOB_NOT_FOUND`** — ודא שה-`JOB_ID` קיים (בדוק דרך `/api/jobs/list`).
+* **422 `NO_RESUME`** — אין רשומת Resume; הרץ Analyze או צור ידנית ב-Studio.
+* **422 `OVER_WORD_LIMIT`** — המודל/המשתמש חרג ממגבלת מילים (POST/PUT). קצץ ושמור שוב.
+* **שגיאת dynamic/SSR בעמוד משרה** — אל תייבא `next/dynamic({ ssr:false })` ב-Server Component.
+* **Draft לא מתעדכן** — בדוק ב-Prisma Studio. לשיפור אטומיות: הוסף `@@unique([userId, jobId])` ועבור ל-`upsert`.
 
 ---
 
-## ✅ צ’קליסט Stage 11
+## ✅ צ’קליסט Stage 12
 
-* [x] **Engine (V1):** `lib/match/engine.ts` — חישוב לפי כיסוי סקילז + `reasons`/`breakdown`
-* [x] **API:** `GET /api/jobs/:id/match` (מוגן `withUser`) — שליפת Job+Resume, חישוב, Persist ל־`Match`
-* [x] **UI:** `JobMatchPanel` (Client) + שילוב ב־`/jobs/:id`
-* [x] **בדיקות:**
+* [x] **ספריית פרומפטים:** `lib/cover-letter/prompt.ts` + בדיקות smoke.
+* [x] **API:**
 
-  * מנוע: `npx tsx scripts/test-match.ts`
-  * ידניות: 200/401/404/422 + בדיקת עדכון ב־Prisma Studio
-* [x] **Git:** קומיט מסכם (ללא `.env`)
+  * `GET /api/jobs/:id/cover-letter` — שליפת טיוטה קיימת.
+  * `POST /api/jobs/:id/cover-letter` — יצירה עם AI + שמירה כ-Draft.
+  * `PUT /api/jobs/:id/cover-letter` — עדכון ידני ושמירה.
+* [x] **UI:** `CoverLetterEditor` + שילוב ב-`/jobs/:id`.
+* [x] **בדיקות:** 200/401/404/422/500, וידוא Persist ב-Prisma Studio.
+* [x] **Git:** קומיטים ללא `.env`.
 
 ---
 
 ## 🔜 המשך דרך
 
-* **Stage 11.1:** משקולים לניסיון (`candidateYears`) ולמיקום (`jobLocation`) במשקל כולל.
-* **DB יציבות:** הוסף `@@unique([userId, jobId])` ל־`Match` והחלף ל־`upsert`.
-* **UI רשימות:** פילטר “הצג ≥ 70” בעמוד `/jobs`.
-* OCR ל-PDF סרוקים, Queue/Worker ל-PDF כבדים, Ajv Validation ל-Schemas, דשבורד פרופיל.
+* **DB יציבות:** `@@unique([userId, jobId])` ל-`ApplicationDraft` + מעבר ל-`upsert`.
+* **UX:** שמירה אוטומטית (debounce), Toasts, הדגשת מילות מפתח מהמשרה בטקסט.
+* **בקרת טון/שפה:** פרופילים (ענייני/פורמלי/חם) + בחירת שפה ידנית מה-UI.
+* **היסטוריית גרסאות:** שמירת snapshot-ים של טיוטות.
+* **אינטגרציה:** הורדה כ-PDF/Markdown, שליחה ישירה לפורטל (בעתיד).
 
 ---
 
