@@ -1,8 +1,8 @@
-// app/jobs/[id]/page.tsx
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import JobMatchPanel from "@/components/JobMatchPanel"; // ← ייבוא רגיל של Client Component
 
-// (אופציונלי) ודא שהעמוד תמיד דינמי:
+// נשאיר את המטא-דאטה של Next:
 export const dynamic = "force-dynamic";
 
 export default async function JobDetailPage({
@@ -24,7 +24,7 @@ export default async function JobDetailPage({
     },
   });
 
-  if (!job) return notFound(); // דף 404 סטנדרטי של Next
+  if (!job) return notFound();
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-4">
@@ -70,6 +70,9 @@ export default async function JobDetailPage({
           </a>
         </div>
       )}
+
+      {/* פנל ציון התאמה (Client) */}
+      <JobMatchPanel jobId={job.id} />
     </main>
   );
 }
