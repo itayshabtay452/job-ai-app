@@ -1,3 +1,4 @@
+//C:\Users\itays\Desktop\33\job-ai-app\tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [

@@ -1,10 +1,11 @@
+// components/CoverLetterEditor.tsx
 "use client";
 
 import * as React from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Props = { jobId: string; maxWords?: number };
 
-// Utility קטן לספירת מילים
 function countWords(s: string) {
   return (s ?? "").trim().split(/\s+/).filter(Boolean).length;
 }
@@ -18,7 +19,6 @@ export default function CoverLetterEditor({ jobId, maxWords = 220 }: Props) {
   const words = countWords(text);
   const overLimit = words > maxWords;
 
-  // טען טיוטה קיימת
   const load = React.useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -36,9 +36,10 @@ export default function CoverLetterEditor({ jobId, maxWords = 220 }: Props) {
     }
   }, [jobId]);
 
-  React.useEffect(() => { void load(); }, [load]);
+  React.useEffect(() => {
+    void load();
+  }, [load]);
 
-  // יצירה אוטומטית עם AI
   async function onGenerate() {
     setGenerating(true);
     setError(null);
@@ -60,7 +61,6 @@ export default function CoverLetterEditor({ jobId, maxWords = 220 }: Props) {
     }
   }
 
-  // שמירה ידנית
   async function onSave() {
     setSaving(true);
     setError(null);
@@ -74,7 +74,7 @@ export default function CoverLetterEditor({ jobId, maxWords = 220 }: Props) {
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || `שגיאת שרת (${res.status})`);
       }
-      // אפשר להראות toast בעתיד; כרגע שקט
+      // אפשר להראות toast בשלב 13.5
     } catch (e: any) {
       setError(e?.message || "נכשל בשמירת טיוטה");
     } finally {
@@ -82,21 +82,29 @@ export default function CoverLetterEditor({ jobId, maxWords = 220 }: Props) {
     }
   }
 
+  const busy = loading || generating || saving;
+
   return (
-    <div className="mt-8 rounded-2xl border p-4 space-y-3">
+    <div
+      className="mt-8 rounded-2xl border p-4 space-y-3"
+      aria-busy={busy ? "true" : "false"}
+      aria-live="polite"
+    >
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">מכתב פנייה (טיוטה)</h3>
         <div className="flex items-center gap-2">
           <button
             onClick={onGenerate}
-            disabled={generating}
+            disabled={generating || loading}
+            aria-disabled={generating || loading}
             className="text-sm rounded-md border px-3 py-1 hover:bg-muted transition disabled:opacity-50"
           >
             {generating ? "מייצר…" : "צור מכתב אוטומטי"}
           </button>
           <button
             onClick={onSave}
-            disabled={saving || overLimit}
+            disabled={saving || overLimit || loading}
+            aria-disabled={saving || overLimit || loading}
             className="text-sm rounded-md border px-3 py-1 hover:bg-muted transition disabled:opacity-50"
           >
             {saving ? "שומר…" : "שמור טיוטה"}
@@ -104,13 +112,35 @@ export default function CoverLetterEditor({ jobId, maxWords = 220 }: Props) {
         </div>
       </div>
 
+      {/* Loading skeleton */}
       {loading ? (
-        <div className="text-sm text-muted-foreground">טוען טיוטה…</div>
+        <div role="status" className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-5 w-40" />
+            <div className="flex gap-2">
+              <Skeleton className="h-7 w-28" />
+              <Skeleton className="h-7 w-24" />
+            </div>
+          </div>
+          <Skeleton className="h-40 w-full" />
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+        </div>
       ) : (
         <>
-          {error && <div className="text-sm text-red-600">שגיאה: {error}</div>}
+          {error && (
+            <div role="alert" className="text-sm text-red-600">
+              שגיאה: {error}
+            </div>
+          )}
 
+          <label htmlFor="cover-letter-textarea" className="sr-only">
+            אזור עריכת מכתב פנייה
+          </label>
           <textarea
+            id="cover-letter-textarea"
             className="w-full min-h-[220px] rounded-md border p-3 text-sm"
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -125,7 +155,7 @@ export default function CoverLetterEditor({ jobId, maxWords = 220 }: Props) {
           </div>
 
           {overLimit && (
-            <div className="text-xs text-red-600">
+            <div className="text-xs text-red-600" role="alert">
               הטיוטה חורגת ממגבלת המילים — קיצור נדרש לפני שמירה.
             </div>
           )}

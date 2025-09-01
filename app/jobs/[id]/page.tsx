@@ -1,3 +1,5 @@
+//C:\Users\itays\Desktop\33\job-ai-app\app\jobs\[id]\page.tsx
+
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import JobMatchPanel from "@/components/JobMatchPanel"; // ← ייבוא רגיל של Client Component

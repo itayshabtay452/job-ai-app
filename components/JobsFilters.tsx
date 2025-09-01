@@ -1,7 +1,7 @@
 // components/JobsFilters.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 export type JobsQuery = {
@@ -13,13 +13,29 @@ export type JobsQuery = {
 export default function JobsFilters({
   onChange,
   initial = {},
+  live = true,          // עדכון חי — כברירת מחדל
+  showActions = false,  // ← חדש: ברירת מחדל לכבות את הכפתורים
 }: {
   onChange: (q: JobsQuery) => void;
   initial?: JobsQuery;
+  live?: boolean;
+  showActions?: boolean;
 }) {
   const [q, setQ] = useState(initial.q ?? "");
   const [location, setLocation] = useState(initial.location ?? "");
   const [skill, setSkill] = useState(initial.skill ?? "");
+
+  // סנכרון עם initial (מ־URL)
+  useEffect(() => { setQ(initial.q ?? ""); }, [initial.q]);
+  useEffect(() => { setLocation(initial.location ?? ""); }, [initial.location]);
+  useEffect(() => { setSkill(initial.skill ?? ""); }, [initial.skill]);
+
+  // דיווח חי בכל שינוי שדה (ה-debounce מתבצע בעמוד)
+  useEffect(() => {
+    if (!live) return;
+    onChange({ q, location, skill });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, location, skill, live]);
 
   function submit() {
     onChange({ q, location, skill });
@@ -32,7 +48,6 @@ export default function JobsFilters({
     onChange({ q: "", location: "", skill: "" });
   }
 
-  // שליחת חיפוש גם בלחיצת Enter
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") submit();
   }
@@ -47,6 +62,7 @@ export default function JobsFilters({
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="כותרת / חברה / תיאור"
+          aria-label="חיפוש חופשי"
         />
       </div>
 
@@ -58,6 +74,7 @@ export default function JobsFilters({
           onChange={(e) => setLocation(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="Tel Aviv / Remote"
+          aria-label="מיקום"
         />
       </div>
 
@@ -69,15 +86,18 @@ export default function JobsFilters({
           onChange={(e) => setSkill(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="react / postgres / docker"
+          aria-label="Skill"
         />
       </div>
 
-      <div className="flex items-center gap-2">
-        <Button onClick={submit}>סנן</Button>
-        <Button variant="ghost" onClick={reset}>
-          נקה
-        </Button>
-      </div>
+      {showActions && (
+        <div className="flex items-center gap-2">
+          <Button onClick={submit}>סנן</Button>
+          <Button variant="ghost" onClick={reset}>
+            נקה
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

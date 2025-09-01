@@ -1,3 +1,5 @@
+//C:\Users\itays\Desktop\33\job-ai-app\app\dashboard\page.tsx
+
 export default function DashboardPage() {
   return (
     <main className="mx-auto max-w-5xl p-6">
