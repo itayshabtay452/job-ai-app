@@ -1,203 +1,254 @@
 // app/api/jobs/[id]/cover-letter/route.ts
 import { NextResponse } from "next/server";
-import { withUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { withUser } from "@/lib/auth";
+import { rateLimitTouch, rateLimitHeaders } from "@/lib/security/rateLimit";
+import { PostCoverLetterSchema, PutCoverLetterSchema, wordCount } from "@/lib/validation/coverLetter";
+import { buildCoverLetterPrompt, extractResumeProfile } from "@/lib/cover-letter/prompt";
 import OpenAI from "openai";
-import {
-  buildCoverLetterPrompt,
-  detectLanguageFromJob,
-} from "@/lib/cover-letter/prompt";
 
 export const runtime = "nodejs";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// === עזר משותף ===
-function countWords(s: string): number {
-  return (s ?? "").trim().split(/\s+/).filter(Boolean).length;
+/** עוזר קטן לקריאת JSON בבטחה */
+async function safeJson<T = unknown>(req: Request): Promise<T | null> {
+  try {
+    return (await req.json()) as T;
+  } catch {
+    return null;
+  }
 }
 
-async function getJobOr404(jobId: string) {
-  const job = await prisma.job.findUnique({
-    where: { id: jobId },
-    select: {
-      id: true,
-      title: true,
-      company: true,
-      location: true,
-      description: true,
-      skillsRequired: true,
-    },
-  });
-  return job; // null אם לא קיים
+/** בחירה אחידה של שדות Draft לתשובה */
+function shapeDraft(d: { id: string; coverLetter: string; updatedAt: Date }) {
+  return { id: d.id, coverLetter: d.coverLetter, updatedAt: d.updatedAt.toISOString() };
 }
 
-async function getResumeOrNull(userId: string) {
-  return prisma.resume.findUnique({
-    where: { userId },
-    select: { text: true, skills: true, yearsExp: true },
-  });
-}
-
-// === GET (מהצעד הקודם): שליפת טיוטה קיימת ===
+/** GET /api/jobs/[id]/cover-letter — שליפת טיוטה (אם קיימת) */
 export async function GET(req: Request, ctx: { params: { id: string } }) {
   const jobId = ctx.params.id;
 
   return withUser(async (_req, { user }) => {
-    const job = await getJobOr404(jobId);
+    // RL: 30 לדקה
+    const LIMIT = 30;
+    const rl = rateLimitTouch({ key: `cover:get:${user.id}`, limit: LIMIT, windowMs: 60_000 });
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: "RATE_LIMITED" },
+        { status: 429, headers: rateLimitHeaders(rl, LIMIT) }
+      );
+    }
+
+    const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
     if (!job) {
-      return NextResponse.json({ ok: false, error: "JOB_NOT_FOUND" }, { status: 404 });
+      return NextResponse.json(
+        { ok: false, error: "JOB_NOT_FOUND" },
+        { status: 404, headers: rateLimitHeaders(rl, LIMIT) }
+      );
     }
 
     const draft = await prisma.applicationDraft.findFirst({
-      where: { userId: user.id, jobId: job.id }, // הקשחת בעלות למשתמש
-      orderBy: { updatedAt: "desc" },
+      where: { userId: user.id, jobId: job.id },
       select: { id: true, coverLetter: true, updatedAt: true },
     });
 
-    return NextResponse.json({
-      ok: true,
-      draft: draft ? { id: draft.id, coverLetter: draft.coverLetter, updatedAt: draft.updatedAt } : null,
-    });
+    return NextResponse.json(
+      { ok: true, draft: draft ? shapeDraft(draft) : null },
+      { headers: rateLimitHeaders(rl, LIMIT) }
+    );
   })(req);
 }
 
-// === POST: יצירה עם AI ושמירת טיוטה ===
+/** POST /api/jobs/[id]/cover-letter — יצירה עם AI ושמירה כטיוטה */
 export async function POST(req: Request, ctx: { params: { id: string } }) {
   const jobId = ctx.params.id;
 
   return withUser(async (_req, { user }) => {
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ ok: false, error: "MISSING_OPENAI_KEY" }, { status: 500 });
+    // RL: 5 לכל 10 דקות
+    const LIMIT = 5;
+    const WINDOW = 600_000;
+    const rl = rateLimitTouch({ key: `cover:post:${user.id}`, limit: LIMIT, windowMs: WINDOW });
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: "RATE_LIMITED" },
+        { status: 429, headers: rateLimitHeaders(rl, LIMIT) }
+      );
     }
 
-    // 1) וידוא משרה
-    const job = await getJobOr404(jobId);
+    // ולידציה של גוף הבקשה
+    const body = await safeJson(_req);
+    const parsed = PostCoverLetterSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return NextResponse.json(
+        { ok: false, error: "ZOD_INVALID_BODY", issues: parsed.error.issues },
+        { status: 400, headers: rateLimitHeaders(rl, LIMIT) }
+      );
+    }
+    const maxWords = parsed.data.maxWords ?? 220;
+
+    // נתונים
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      select: { id: true, title: true, company: true, location: true, description: true, skillsRequired: true },
+    });
     if (!job) {
-      return NextResponse.json({ ok: false, error: "JOB_NOT_FOUND" }, { status: 404 });
+      return NextResponse.json(
+        { ok: false, error: "JOB_NOT_FOUND" },
+        { status: 404, headers: rateLimitHeaders(rl, LIMIT) }
+      );
     }
 
-    // 2) וידוא Resume
-    const resume = await getResumeOrNull(user.id);
+    const resume = await prisma.resume.findUnique({
+      where: { userId: user.id },
+      select: { skills: true, text: true, yearsExp: true },
+    });
     if (!resume) {
-      return NextResponse.json({ ok: false, error: "NO_RESUME" }, { status: 422 });
+      return NextResponse.json(
+        { ok: false, error: "NO_RESUME" },
+        { status: 422, headers: rateLimitHeaders(rl, LIMIT) }
+      );
     }
 
-    // 3) קריאת גוף (maxWords אופציונלי)
-    let maxWords = 220;
-    try {
-      const body = await req.json().catch(() => ({}));
-      if (typeof body?.maxWords === "number" && body.maxWords > 50 && body.maxWords <= 400) {
-        maxWords = Math.floor(body.maxWords);
-      }
-    } catch {
-      /* ignore */
-    }
+    // אחרי שהבאנו את resume ו- job:
 
-    // 4) בניית פרומפט
+    const profile = extractResumeProfile(resume.skills);
+
+    // נבנה את האובייקט המדויק ש-ResumeLike מצפה לו
+    const resumeLike = {
+      text: resume.text,
+      yearsExp: typeof resume.yearsExp === "number" ? resume.yearsExp : undefined, // לא null
+      profile, // { skills[], tools[], dbs[], highlights? }
+    } as const;
+
+    // ועכשיו בונים את הפרומפט עם טיפוסים תואמים
     const prompt = buildCoverLetterPrompt({
-      job,
-      resume: { text: resume.text, skills: resume.skills, yearsExp: resume.yearsExp ?? null },
+      job,          // השדות שבחרת ב-select מתאימים ל-JobLike
+      resume: resumeLike,
       maxWords,
-      language: detectLanguageFromJob(job),
     });
 
-    // 5) קריאה ל-OpenAI
+
+    // OpenAI
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { ok: false, error: "MISSING_OPENAI_KEY" },
+        { status: 500, headers: rateLimitHeaders(rl, LIMIT) }
+      );
+    }
+    const openai = new OpenAI({ apiKey });
+
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // בחר דגם זול/זריז. אפשר לשנות לפי הצורך.
+      model: "gpt-4o-mini",
       messages: prompt.messages,
-      temperature: 0.5,
+      temperature: 0.3,
     });
 
-    const content = completion.choices?.[0]?.message?.content?.trim() ?? "";
+    const content = completion.choices?.[0]?.message?.content?.toString().trim() ?? "";
     if (!content) {
-      return NextResponse.json({ ok: false, error: "EMPTY_COMPLETION" }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: "EMPTY_COMPLETION" },
+        { status: 500, headers: rateLimitHeaders(rl, LIMIT) }
+      );
     }
 
-    // 6) בדיקת מגבלת מילים
-    if (countWords(content) > prompt.maxWords) {
-      return NextResponse.json({ ok: false, error: "OVER_WORD_LIMIT" }, { status: 422 });
+    // בדיקת מגבלת מילים קשיחה
+    if (wordCount(content) > maxWords) {
+      return NextResponse.json(
+        { ok: false, error: "OVER_WORD_LIMIT", maxWords },
+        { status: 422, headers: rateLimitHeaders(rl, LIMIT) }
+      );
     }
 
-    // 7) Persist: עדכון/יצירה לפי (userId, jobId)
+    // persist draft (ללא @@unique — update/create)
     const existing = await prisma.applicationDraft.findFirst({
       where: { userId: user.id, jobId: job.id },
       select: { id: true },
     });
 
-    let draftId: string;
+    let saved;
     if (existing) {
-      const updated = await prisma.applicationDraft.update({
+      saved = await prisma.applicationDraft.update({
         where: { id: existing.id },
         data: { coverLetter: content },
-        select: { id: true },
+        select: { id: true, coverLetter: true, updatedAt: true },
       });
-      draftId = updated.id;
     } else {
-      const created = await prisma.applicationDraft.create({
+      saved = await prisma.applicationDraft.create({
         data: { userId: user.id, jobId: job.id, coverLetter: content },
-        select: { id: true },
+        select: { id: true, coverLetter: true, updatedAt: true },
       });
-      draftId = created.id;
     }
 
-    // 8) תשובה
-    return NextResponse.json({
-      ok: true,
-      draft: { id: draftId, coverLetter: content, maxWords: prompt.maxWords },
-    });
+    return NextResponse.json(
+      { ok: true, draft: shapeDraft(saved), maxWords },
+      { headers: rateLimitHeaders(rl, LIMIT) }
+    );
   })(req);
 }
 
-
-// PUT — עדכון טיוטה ידני אחרי עריכה
+/** PUT /api/jobs/[id]/cover-letter — עדכון ידני ושמירה כטיוטה */
 export async function PUT(req: Request, ctx: { params: { id: string } }) {
   const jobId = ctx.params.id;
 
   return withUser(async (_req, { user }) => {
-    // 1) קריאת גוף ובדיקות בסיס
-    const body = await req.json().catch(() => ({}));
-    const coverLetter: string = typeof body?.coverLetter === "string" ? body.coverLetter.trim() : "";
-
-    if (!coverLetter) {
-      return NextResponse.json({ ok: false, error: "EMPTY_CONTENT" }, { status: 422 });
-    }
-    // תקרת-בטיחות: מקסימום 400 מילים בעדכון ידני
-    const wordCount = (coverLetter.split(/\s+/).filter(Boolean)).length;
-    if (wordCount > 400) {
-      return NextResponse.json({ ok: false, error: "OVER_WORD_LIMIT" }, { status: 422 });
+    // RL: 20 לדקה
+    const LIMIT = 20;
+    const rl = rateLimitTouch({ key: `cover:put:${user.id}`, limit: LIMIT, windowMs: 60_000 });
+    if (!rl.ok) {
+      return NextResponse.json(
+        { ok: false, error: "RATE_LIMITED" },
+        { status: 429, headers: rateLimitHeaders(rl, LIMIT) }
+      );
     }
 
-    // 2) ודא שהמשרה קיימת
-    const job = await getJobOr404(jobId);
+    const body = await safeJson(_req);
+    const parsed = PutCoverLetterSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      return NextResponse.json(
+        { ok: false, error: "ZOD_INVALID_BODY", issues: parsed.error.issues },
+        { status: 400, headers: rateLimitHeaders(rl, LIMIT) }
+      );
+    }
+
+    const text = parsed.data.coverLetter.trim();
+    const wc = wordCount(text);
+    if (wc > 400) {
+      return NextResponse.json(
+        { ok: false, error: "OVER_WORD_LIMIT", maxWords: 400, words: wc },
+        { status: 422, headers: rateLimitHeaders(rl, LIMIT) }
+      );
+    }
+
+    const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
     if (!job) {
-      return NextResponse.json({ ok: false, error: "JOB_NOT_FOUND" }, { status: 404 });
+      return NextResponse.json(
+        { ok: false, error: "JOB_NOT_FOUND" },
+        { status: 404, headers: rateLimitHeaders(rl, LIMIT) }
+      );
     }
 
-    // 3) Persist לפי (userId, jobId): עדכון אם קיים, אחרת יצירה
     const existing = await prisma.applicationDraft.findFirst({
       where: { userId: user.id, jobId: job.id },
       select: { id: true },
     });
 
-    let draftId: string;
+    let saved;
     if (existing) {
-      const updated = await prisma.applicationDraft.update({
+      saved = await prisma.applicationDraft.update({
         where: { id: existing.id },
-        data: { coverLetter },
-        select: { id: true },
+        data: { coverLetter: text },
+        select: { id: true, coverLetter: true, updatedAt: true },
       });
-      draftId = updated.id;
     } else {
-      const created = await prisma.applicationDraft.create({
-        data: { userId: user.id, jobId: job.id, coverLetter },
-        select: { id: true },
+      saved = await prisma.applicationDraft.create({
+        data: { userId: user.id, jobId: job.id, coverLetter: text },
+        select: { id: true, coverLetter: true, updatedAt: true },
       });
-      draftId = created.id;
     }
 
-    // 4) תשובה
-    return NextResponse.json({ ok: true, draft: { id: draftId } });
+    return NextResponse.json(
+      { ok: true, draft: shapeDraft(saved) },
+      { headers: rateLimitHeaders(rl, LIMIT) }
+    );
   })(req);
 }
-

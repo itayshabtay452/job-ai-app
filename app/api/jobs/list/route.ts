@@ -1,53 +1,55 @@
 // app/api/jobs/list/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { JobsListQuerySchema } from "@/lib/validation/jobs";
 
 export const runtime = "nodejs";
 
 /**
- * GET /api/jobs/list?q=&location=&skill=&page=&pageSize=
- * מחזיר רשימת משרות עם פילטרים בסיסיים ועמוד/גודל עמוד.
+ * GET /api/jobs/list?q&location&skill&page&pageSize
+ * ציבורי לקריאה; כעת עם Zod לולידציה של הפרמטרים.
  */
 export async function GET(req: Request) {
-  // 1) שליפה בטוחה של פרמטרים מה-URL
-  const { searchParams } = new URL(req.url);
-  const q        = (searchParams.get("q") || "").trim();
-  const location = (searchParams.get("location") || "").trim();
-  const skill    = (searchParams.get("skill") || "").trim().toLowerCase();
+  try {
+    const url = new URL(req.url);
+    // הפיכת URLSearchParams ל-Object רגיל ואז safeParse
+    const input = Object.fromEntries(url.searchParams.entries());
+    const parsed = JobsListQuerySchema.safeParse(input);
 
-  // 2) עמודים עם גבולות: page>=1, 1<=pageSize<=50
-  const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
-  const pageSizeRaw = parseInt(searchParams.get("pageSize") || "20", 10);
-  const pageSize = Math.min(50, Math.max(1, isNaN(pageSizeRaw) ? 20 : pageSizeRaw));
+    if (!parsed.success) {
+      return NextResponse.json(
+        { ok: false, error: "ZOD_INVALID_QUERY", issues: parsed.error.issues },
+        { status: 400 }
+      );
+    }
 
-  // 3) בניית where דינמי
-  const where: any = {};
+    const { q, location, skill, page, pageSize } = parsed.data;
 
-  if (q) {
-    where.OR = [
-      { title:       { contains: q, mode: "insensitive" } },
-      { company:     { contains: q, mode: "insensitive" } },
-      { location:    { contains: q, mode: "insensitive" } },
-      { description: { contains: q, mode: "insensitive" } },
-    ];
-  }
+    // where דינמי לפי פרמטרים
+    const AND: any[] = [];
+    if (q && q.length > 0) {
+      AND.push({
+        OR: [
+          { title: { contains: q, mode: "insensitive" } },
+          { company: { contains: q, mode: "insensitive" } },
+          { location: { contains: q, mode: "insensitive" } },
+          { description: { contains: q, mode: "insensitive" } },
+        ],
+      });
+    }
+    if (location && location.length > 0) {
+      AND.push({ location: { contains: location, mode: "insensitive" } });
+    }
+    if (skill && skill.length > 0) {
+      AND.push({ skillsRequired: { has: skill } }); // מאחר והסקילז נשמרו lowercase
+    }
 
-  if (location) {
-    // אם יש גם q וגם location, התנאים יצברו (AND)
-    where.location = { contains: location, mode: "insensitive" };
-  }
+    const where = AND.length ? { AND } : {};
 
-  if (skill) {
-    // skillsRequired הוא String[] → אפשר להשתמש ב-has
-    where.skillsRequired = { has: skill };
-  }
-
-  // 4) שתי פניות במקביל: count + findMany (עם דפדוף)
-  const [total, items] = await Promise.all([
-    prisma.job.count({ where }),
-    prisma.job.findMany({
+    const total = await prisma.job.count({ where });
+    const items = await prisma.job.findMany({
       where,
-      orderBy: { createdAt: "desc" },              // יש לנו @@index([createdAt]) בסכמה
+      orderBy: { createdAt: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
       select: {
@@ -59,15 +61,20 @@ export async function GET(req: Request) {
         url: true,
         createdAt: true,
       },
-    }),
-  ]);
+    });
 
-  // 5) החזרת תשובה מסודרת ללקוח
-  return NextResponse.json({
-    ok: true,
-    total,
-    page,
-    pageSize,
-    items,
-  });
+    return NextResponse.json({
+      ok: true,
+      total,
+      page,
+      pageSize,
+      items,
+    });
+  } catch (e: any) {
+    // ניזהר לא לדלוף פרטים
+    return NextResponse.json(
+      { ok: false, error: "INTERNAL_ERROR" },
+      { status: 500 }
+    );
+  }
 }
