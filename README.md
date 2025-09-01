@@ -58,19 +58,19 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  JD[/jobs/:id (Server)/]
-  L[app/jobs/:id/loading.tsx]
-  E[app/jobs/:id/error.tsx]
-  MP[JobMatchPanel (Client)]
-  MB[MatchBadge (Client)]
-  CL[CoverLetterEditor (Client)]
-  MAPI[/GET /api/jobs/:id/match/]
-  CLAPI[/GET|POST|PUT /api/jobs/:id/cover-letter/]
+  JD["/jobs/:id (server)"]
+  L["app/jobs/:id/loading.tsx"]
+  E["app/jobs/:id/error.tsx"]
+  MP["JobMatchPanel (client)"]
+  MB["MatchBadge (client)"]
+  CL["CoverLetterEditor (client)"]
+  MAPI["GET /api/jobs/:id/match"]
+  CLAPI["/api/jobs/:id/cover-letter (GET | POST | PUT)"]
 
   JD --> MP
   JD --> CL
-  JD -. shows .-> L
-  JD -. shows .-> E
+  JD -.-> L
+  JD -.-> E
   MP --> MAPI
   MB --> MAPI
   CL --> CLAPI
