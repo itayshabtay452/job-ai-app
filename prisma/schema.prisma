@@ -9,21 +9,22 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  image     String?        // ← חדש
-  emailVerified DateTime?  // ← חדש
-  createdAt DateTime @default(now())
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String? // ← חדש
+  emailVerified DateTime? // ← חדש
+  createdAt     DateTime  @default(now())
 
-  resumes   Resume[]
-  matches   Match[]
-  drafts    ApplicationDraft[]
+  resumes Resume[]
+  matches Match[]
+  drafts  ApplicationDraft[]
 
-  accounts  Account[]
-  sessions  Session[]
+  accounts   Account[]
+  sessions   Session[]
+  AiUsage    AiUsage[]
+  UsageEvent UsageEvent[]
 }
-
 
 model Account {
   id                String  @id @default(cuid())
@@ -60,38 +61,35 @@ model VerificationToken {
   @@id([identifier, token])
 }
 
-
 model Resume {
   id        String   @id @default(cuid())
   user      User     @relation(fields: [userId], references: [id])
-  userId    String   @unique   // ← ייחודי כדי לאפשר upsert לפי userId
+  userId    String   @unique // ← ייחודי כדי לאפשר upsert לפי userId
   text      String
   skills    Json
   yearsExp  Int?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt   // ← נוח למעקב
+  updatedAt DateTime @updatedAt // ← נוח למעקב
 }
-
 
 model Job {
   id             String   @id @default(cuid())
   source         String
-  externalId     String           // ← מזהה מהמקור (או מחושב)
+  externalId     String // ← מזהה מהמקור (או מחושב)
   title          String
   company        String
   location       String?
   description    String
-  skillsRequired String[]         // ← היה Json, עכשיו מערך טקסט
+  skillsRequired String[] // ← היה Json, עכשיו מערך טקסט
   url            String?
   createdAt      DateTime @default(now())
 
-  matches        Match[]
-  drafts         ApplicationDraft[]
+  matches Match[]
+  drafts  ApplicationDraft[]
 
-  @@unique([source, externalId])  // ← מונע כפילויות בין מקורות
-  @@index([createdAt])            // ← לעמודות לפי תאריך
+  @@unique([source, externalId]) // ← מונע כפילויות בין מקורות
+  @@index([createdAt]) // ← לעמודות לפי תאריך
 }
-
 
 model Match {
   id        String   @id @default(cuid())
@@ -113,4 +111,41 @@ model ApplicationDraft {
   coverLetter String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+/// רישום שימוש ב-AI (OpenAI): טוקנים, מודל, סטטוס, זמן תגובה, עלות משוערת (אופציונלי).
+model AiUsage {
+  id               String   @id @default(cuid())
+  userId           String?
+  endpoint         String // למשל "/api/resume/analyze" או "/api/jobs/[id]/cover-letter"
+  method           String // "POST"/"GET"/"PUT"
+  model            String
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  latencyMs        Int
+  status           String // "ok" | "error"
+  error            String? // קיצור הודעת שגיאה, אם יש
+  costUsd          Decimal? @db.Decimal(10, 6)
+  createdAt        DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+}
+
+/// אירועי מוצר בסיסיים (לספירות: יצירת/רג'נרציה של מכתב וכו')
+model UsageEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  type      String // "cover_letter_created" | "cover_letter_regenerated" | ...
+  refId     String? // למשל applicationDraftId או jobId
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([type, createdAt])
+  @@index([userId, createdAt])
 }
