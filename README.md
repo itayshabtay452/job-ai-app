@@ -1,8 +1,8 @@
-להלן **README מעודכן ל–Stage 14** (מוכן להדבקה ב-GitHub: Markdown + Mermaid).
+להדבקה ישירה ב-GitHub👇
 
 ---
 
-# Job AI App — README (Stage 14)
+# Job AI App — README (Stage 15)
 
 > גרסת README מותאמת ל-GitHub (Markdown + Mermaid).
 >
@@ -14,153 +14,154 @@
 > * **Cover Letter (Stage 12):** Job Detail → Generate (AI) / Edit → Save Draft
 > * **UI/UX Polish (Stage 13):** Loading/Skeletons, Filter Chips + Clear All, Debounced Search, Match Badge, Navbar Menu, Resume Upload UX
 > * **Security (Stage 14):** Rate limiting, Zod validation, AuthN review
+> * **Logs & Metrics (Stage 15):** לוג טוקנים/Latency/עלות ל-AI, ספירת אירועי מכתב, API סיכום, דשבורד `/metrics`
 
 ---
 
 ## 🔭 סקירה כללית
 
-בנוסף לפיצ’רים משלב 13, ב-**Stage 14** חיזקנו את שכבת האבטחה:
+ב-**Stage 15** הוספנו תצפיות (Observability) כדי להבין **שימוש ועלויות**:
 
-* **Rate Limiting** לנתיבים כבדים/רגישים:
+* **לוג שימוש ב-AI (OpenAI):**
 
-  * `GET /api/jobs/:id/match`
-  * `GET/POST/PUT /api/jobs/:id/cover-letter`
-* **ולידציה עם Zod** לפרמטרים/גוף בקשות:
+  * מודל, טוקנים (`prompt/completion/total`), זמן תגובה (ms), סטטוס (`ok`/`error`), ושגיאה מקוצרת.
+  * חישוב **עלות משוערת** (אם הוגדר מחירון במשתנה סביבה).
+* **אירועי מוצר (Usage Events):**
 
-  * `GET /api/jobs/list` (query)
-  * `POST/PUT /api/jobs/:id/cover-letter` (body)
-* **ביקורת AuthN/AuthZ**: ודאנו שכל ה-API-ים הרגישים מוגנים ב-`withUser` וששאילתות מסננות לפי `userId`.
+  * `cover_letter_created` / `cover_letter_regenerated` — לספירת יצירה/רג'נרציה.
+* **API סיכום:** `GET /api/metrics/summary?days=N`
+* **דשבורד:** `/metrics` (Server Component) — KPI Cards תואמי UI קיים.
 
-> 💡 **מונחים**:
-> **AuthN (Authentication)** — אימות זהות (מי אתה).
-> **AuthZ (Authorization)** — הרשאה לפעולה/משאב (מה מותר לך).
+> 💡 למה למדוד כבר עכשיו? כדי לזהות מוקדם “כיסים יקרים” (מודלים/זרימות), להבין אימפקט של פיצ'רים, ולהצדיק אופטימיזציה לפני התרחבות שימוש.
 
 ---
 
 ## 📈 תרשימי זרימה
 
-### Rate Limit ב-Match/Cover Letter
+### אינסטרומנטציה סביב קריאת AI (Cover Letter / Analyze)
 
 ```mermaid
 sequenceDiagram
   participant C as Client
   participant API as API Route
-  participant RL as lib/security/rateLimit.ts
-  participant S as Service (DB/OpenAI)
+  participant O as OpenAI
+  participant U as AiUsage (DB)
+  participant E as UsageEvent (DB)
 
-  C->>API: Request (/match or /cover-letter)
-  API->>RL: check(key=userId|ip, limit, window)
-  alt allowed
-    RL-->>API: ok
-    API->>S: continue (DB/OpenAI)
-    S-->>API: result
-    API-->>C: 200 + headers (X-RateLimit-*)
-  else blocked
-    RL-->>API: blocked
-    API-->>C: 429 Too Many Requests + Retry-After
+  C->>API: POST /cover-letter (או /resume/analyze)
+  API->>API: t0 = now
+  API->>O: call OpenAI (model, messages)
+  alt success
+    O-->>API: completion {usage, model, choices}
+    API->>API: t1 = now, latency = t1 - t0
+    API->>U: create AiUsage {tokens, model, latency, status:"ok", costUsd?}
+    opt cover-letter only
+      API->>E: create UsageEvent {type: created|regenerated}
+    end
+    API-->>C: 200 + data
+  else error
+    API->>API: t1 = now
+    API->>U: create AiUsage {0-tokens, latency, status:"error", error}
+    API-->>C: 5xx/4xx (כמו קודם)
   end
 ```
 
-### ולידציה עם Zod (דוגמה: `/api/jobs/list`)
+### API סיכום מדדים
 
 ```mermaid
 flowchart LR
-  U[User] -->|query params| API[GET /api/jobs/list]
-  API --> Z[Zod parse]
-  Z -->|ok| DB[(Postgres)]
-  Z -->|error| E[400 ZOD_INVALID_QUERY]
+  U[User (authed)] -->|GET /api/metrics/summary?days=N| S[Summary Route]
+  S -->|aggregate| DB[(Postgres)]
+  DB --> S
+  S -->|JSON| U
 ```
 
 ---
 
-## 🧱 סכמת נתונים (Prisma)
+## 🧱 סכמת נתונים (Prisma) — Stage 15
 
-**אין שינויי סכימה ב-Stage 14**. (כמו Stage 12–13)
+נוספו שני מודלים:
 
-* `Resume`, `Job`, `Match`, `ApplicationDraft` — ללא עדכון במודל.
+* **`AiUsage`** — לוג שימוש ב-AI
+  שדות עיקריים: `endpoint`, `method`, `model`, `promptTokens`, `completionTokens`, `totalTokens`, `latencyMs`, `status`, `error?`, `costUsd?`, `userId?`, `createdAt`.
+  אינדקסים: `@@index([createdAt])`, `@@index([userId, createdAt])`.
+
+* **`UsageEvent`** — אירועי מוצר
+  שדות עיקריים: `type` (`cover_letter_created`/`cover_letter_regenerated`/...), `refId?`, `meta?`, `userId?`, `createdAt`.
+  אינדקסים: `@@index([type, createdAt])`, `@@index([userId, createdAt])`.
+
+> שאר המודלים (User/Account/Session/Resume/Job/Match/ApplicationDraft) ללא שינוי.
 
 ---
 
 ## 🔐 אימות והרשאות
 
-* `withUser` ממשיך להגן על:
+* **עם `withUser`**:
 
-  * `POST /api/jobs/ingest`
-  * `POST /api/resume/upload`
-  * `POST /api/resume/parse`
   * `POST /api/resume/analyze`
-  * `GET /api/jobs/:id/match`
   * `GET/POST/PUT /api/jobs/:id/cover-letter`
+  * `POST /api/jobs/ingest`
+  * `GET /api/metrics/summary?days=N` (סיכום **למשתמש הנוכחי** בלבד)
+
 * ציבורי:
 
   * `GET /api/jobs/list`
   * `GET /api/jobs/:id`
 
+> Rate Limit ו-Zod מ-Stage 14 נשארו פעילים.
+
 ---
 
 ## 🧪 API
 
-### (תזכורת Stage 9–13)
+### חדש (Stage 15)
 
-1. `POST /api/resume/upload` *(מוגן)*
-2. `POST /api/resume/parse` *(מוגן)*
-3. `POST /api/resume/analyze` *(מוגן)*
-4. `POST /api/jobs/ingest` *(מוגן)*
-5. `GET /api/jobs/list` *(ציבורי)*
-6. `GET /api/jobs/:id` *(ציבורי)*
-7. `GET /api/jobs/:id/match` *(מוגן, RL)*
-8. `GET /api/jobs/:id/cover-letter` *(מוגן, RL)*
-9. `POST /api/jobs/:id/cover-letter` *(מוגן, RL, Zod)*
-10. `PUT /api/jobs/:id/cover-letter` *(מוגן, RL, Zod)*
+#### 1) `GET /api/metrics/summary?days=N` *(מוגן)*
+
+סיכום שימוש ל-N הימים האחרונים (ברירת מחדל `7`):
+
+```json
+{
+  "ok": true,
+  "range": { "days": 7, "from": "2025-09-01T…", "to": "2025-09-08T…" },
+  "ai": {
+    "calls": 12,
+    "promptTokens": 3456,
+    "completionTokens": 2100,
+    "totalTokens": 5556,
+    "avgLatencyMs": 812,
+    "costUsd": 0.97
+  },
+  "coverLetters": { "created": 3, "regenerated": 4, "total": 7 }
+}
+```
+
+**דוגמה (דפדפן, מחובר):**
+
+```js
+fetch("/api/metrics/summary?days=14").then(r=>r.json()).then(console.log)
+```
+
+### מעודכן (Stage 15 – אינסטרומנטציה)
+
+* `POST /api/jobs/:id/cover-letter` — לוג AI + אירוע `created/regenerated`.
+* `POST /api/resume/analyze` — לוג AI.
+
+> ההתנהגות העסקית לא השתנתה; רק לוגים/מדדים מתווספים.
 
 ---
 
-### עדכונים מרכזיים ב-Stage 14
+## 🖥️ UI
 
-#### A) Rate limiting (Match/Cover Letter)
+### חדש: `/metrics`
 
-* ספרייה: `lib/security/rateLimit.ts`
-* התנהגות:
+דף KPI Cards תואם ל-UI של האפליקציה (אותה מעטפת `max-w-5xl`, כותרת, כרטיסים “ידניים”). מציג:
 
-  * חריגה מהסף → `429 Too Many Requests` + כותרת `Retry-After`.
-  * כותרות שימושיות: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
+* **AI Usage:** Calls, Tokens (Prompt/Completion/Total), Avg Latency, Cost.
+* **Cover Letters:** Created/Regenerated/Total.
+* **Quick Link:** קישור ל-Raw JSON של ה-API.
 
-**curl לדוגמה (בדיקת חסימה):**
-
-```bash
-# הרץ מהר כמה פעמים ברצף (מחובר) כדי לעבור את הסף
-curl -i "http://localhost:3000/api/jobs/<JOB_ID>/match"
-# מצופה: לאחר יותר מדי בקשות קצרות: 429 + Retry-After
-```
-
-#### B) Zod Validation
-
-* ספריות:
-
-  * `lib/validation/jobs.ts` — סכמת query ל-`/api/jobs/list`
-  * `lib/validation/coverLetter.ts` — סכמות body ל-POST/PUT
-* ראוטים מעודכנים:
-
-  * `app/api/jobs/list/route.ts` — מחזיר `400 ZOD_INVALID_QUERY` עם `issues` על חריגה מגבולות (למשל `pageSize > 50`).
-  * `app/api/jobs/[id]/cover-letter/route.ts` — מחזיר `400` על גוף לא תקין, `422 OVER_WORD_LIMIT` על חריגה ממגבלת מילים העסקית.
-
-**דוגמאות:**
-
-```bash
-# pageSize גדול מדי → 400
-curl -i "http://localhost:3000/api/jobs/list?pageSize=999"
-
-# POST cover-letter עם גוף לא חוקי → 400
-curl -i -X POST -H "Content-Type: application/json" \
-  -d '{"maxWords":"not-a-number"}' \
-  "http://localhost:3000/api/jobs/<JOB_ID>/cover-letter"
-```
-
----
-
-## 🖥️ UI (בלי שינוי מפונקציונליות Stage 13)
-
-* נשארים: Skeletons, Debounced Search, Filter Chips + Clear All, Match Badge, Navbar מודע אימות, Resume Upload משופר, route loading/error.
+בורר טווח ימים דרך query string: `?days=7|14|30`.
 
 ---
 
@@ -182,77 +183,72 @@ NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=...
 GITHUB_ID=...
 GITHUB_SECRET=...
-OPENAI_API_KEY=sk-...   # נדרש ל-POST cover-letter (שרת בלבד)
+OPENAI_API_KEY=sk-...   # נדרש ל-Analyze/Cover Letter (שרת בלבד)
+
+# אופציונלי — חישוב עלות (USD) לפי 1K טוקנים (input/output) לכל prefix של מודל
+# דוגמה לגילום gpt-4o-mini:
+OPENAI_PRICE_PER_1K_JSON={"gpt-4o-mini":{"input":0.15,"output":0.60}}
 ```
 
-> **חשוב:** אל תדחוף `.env/.env.local` לריפו. החזק טמפלייט נקי ב-`.env.local.example`.
+> אם לא תגדיר מחירון — `costUsd` יחזור `null` וזה תקין.
 
 ---
 
-## 📁 מבנה תיקיות (מעודכן)
+## 📁 מבנה תיקיות (מעודכן ל-Stage 15)
 
 ```
 app/
+  layout.tsx
+  providers.tsx
+  metrics/
+    page.tsx                          # Stage 15: דשבורד
   api/
-    auth/[...nextauth]/route.ts
     resume/
       upload/route.ts
       parse/route.ts
-      analyze/route.ts
+      analyze/route.ts                # Stage 15: לוג AI
     jobs/
       ingest/route.ts
-      list/route.ts                     # Stage 14: Zod
-      [id]/route.ts
-      [id]/match/route.ts               # Stage 14: Rate limit
-      [id]/cover-letter/route.ts        # Stage 14: Rate limit + Zod
-  jobs/
-    page.tsx
-    [id]/
-      page.tsx
-      loading.tsx                       # Stage 13
-      error.tsx                         # Stage 13
+      list/route.ts                   # Stage 14: Zod
+      [id]/
+        route.ts
+        match/route.ts                # Stage 14: Rate limit
+        cover-letter/route.ts         # Stage 14+15: Rate limit + Zod + לוג AI + אירועים
+    metrics/
+      summary/route.ts                # Stage 15: API סיכום
 
 components/
-  ui/
-    button.tsx
-    skeleton.tsx                        # Stage 13
   Navbar.tsx
   ResumeUpload.tsx
   JobsFilters.tsx
   FilterChips.tsx
   EmptyState.tsx
   ErrorState.tsx
-  JobMatchPanel.tsx
   MatchBadge.tsx
   CoverLetterEditor.tsx
+  ui/
+    button.tsx
+    skeleton.tsx
 
 lib/
   auth.ts
   db.ts
-  jobs/
-    ...
-  match/
-    engine.ts
+  security/
+    rateLimit.ts                      # Stage 14
+  validation/
+    jobs.ts                           # Stage 14
+    coverLetter.ts                    # Stage 14
   cover-letter/
     prompt.ts
-  security/
-    rateLimit.ts                        # Stage 14
-  validation/
-    jobs.ts                             # Stage 14
-    coverLetter.ts                      # Stage 14
+  match/
+    engine.ts
+  metrics.ts                          # Stage 15: estimateOpenAiCost, logAiUsage, logEvent
 
 hooks/
-  useDebouncedValue.ts
-
-scripts/
-  test-match.ts
-  test-cover-prompt.ts
-
-data/
-  jobs-feed.json
+  useDebounce.ts
 
 prisma/
-  schema.prisma
+  schema.prisma                       # Stage 15: AiUsage, UsageEvent
   migrations/
 ```
 
@@ -260,30 +256,30 @@ prisma/
 
 ## 🧰 תקלות ופתרונות מהירים
 
-* **429 Too Many Requests** — חורג מ-rate limit; המתן ל-`Retry-After` או הפחת קצב.
-* **400 ZOD\_INVALID\_QUERY** ב-`/jobs/list` — בדוק טיפוסי פרמטרים (`page`, `pageSize`, `skill`) ומגבלות.
-* **401 ב-match/cover-letter** — הנתיבים מוגנים; התחבר ב-GitHub.
-* **422 `OVER_WORD_LIMIT`** — תקרת מילים עסקית; קצץ טקסט/הורד `maxWords`.
-* **TypeError ב-cover-letter** — ודא ש-`yearsExp` עובר כ-number/undefined, לא `null`.
+* **אין `costUsd`** — לא הוגדר `OPENAI_PRICE_PER_1K_JSON`. הגדר לפי המודלים בשימוש (התאמה לפי prefix).
+* **שגיאות טיפוסי Prisma (דלגייט לא מזוהה)** — הרץ `prisma generate`, נקה קאש TypeScript/VS Code, ודא שאין כפילויות `@prisma/client`.
+* **429 ב-cover-letter** — נובע מ-Rate Limit משלב 14. המתן לפי `Retry-After` או הרץ לאט יותר.
+* **Analyze נכשל עם JSON** — ודא שה-resume כולל טקסט וש-OpenAI מחזיר `response_format: json_schema` תואם.
 
 ---
 
-## ✅ צ’קליסט Stage 14
+## ✅ צ’קליסט Stage 15
 
-* [x] **Rate Limiting:** `/match`, `/cover-letter`
-* [x] **Zod Validation:** `jobs/list`, `cover-letter (POST/PUT)`
-* [x] **AuthN/AuthZ Review:** כל הנתיבים הרגישים מוגנים ב-`withUser`
-* [x] **בדיקות ידניות:** 200/400/401/422/429 + כותרות Rate Limit
-* [x] **Git:** קומיטים נקיים (ללא `.env`)
+* [x] **DB:** נוספו `AiUsage` + `UsageEvent` עם אינדקסים.
+* [x] **Instrumentation:** `POST /api/jobs/:id/cover-letter` (לוג AI + אירועים), `POST /api/resume/analyze` (לוג AI).
+* [x] **API Summary:** `GET /api/metrics/summary?days=N`.
+* [x] **UI:** עמוד `/metrics` (KPI Cards).
+* [x] **Smoke Tests:** רישום רשומות ל-AiUsage/UsageEvent + התאמה מול הדשבורד.
+* [x] **Git:** קומיטים נקיים, ללא `.env`.
 
 ---
 
 ## 🔜 המשך דרך
 
-* **Hardening נוסף:** הוספת RL גם ל-`/api/resume/analyze`.
-* **DB יציבות:** `@@unique([userId, jobId])` ל-`Match`/`ApplicationDraft` + מעבר ל-`upsert`.
-* **Observability:** לוגים/מטריקות ל-429/400.
-* **Privacy:** סקר אבטחת נתונים (PII), מחזור חיים לקבצים זמניים.
+* **Breakdown מתקדם:** פילוח לפי endpoint/model + גרף קטן (Recharts).
+* **Rate Limit ל-Analyze** (אם נדרש).
+* **איסוף 4xx/429**: ספירה ו-dashboards לטעויות משתמש/קצב.
+* **Privacy & Retention:** מדיניות שמירת לוגים / אנונימיזציה.
 
 ---
 
