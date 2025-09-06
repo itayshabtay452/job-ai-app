@@ -70,10 +70,11 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  U[User (authed)] -->|GET metrics summary| S[Summary Route]
-  S -->|aggregate| DB[(Postgres DB)]
+  U[User] --> S[Summary Route]
+  S --> DB[(Postgres DB)]
   DB --> S
-  S -->|JSON response| U
+  S --> U
+
 ```
 
 ---
