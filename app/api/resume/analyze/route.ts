@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { withUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import OpenAI from "openai";
+// [Stage15] מדדים
+import { logAiUsage } from "@/lib/metrics";
 
 export const runtime = "nodejs";
 
@@ -44,26 +46,67 @@ export const POST = withUser(async (_req, { user }) => {
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  // קריאה למודל עם יציאה מובנית לפי JSON Schema
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",            // דגם מהיר/חסכוני; אפשר לשנות לפי הצורך
-    temperature: 0,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: resume.text },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: { name: "CandidateProfile", schema: ProfileSchema, strict: true },
-    },
-  });
+  // [Stage15] התחלת מדידה סביב קריאת OpenAI
+  const t0 = Date.now();
+  let completion;
+  try {
+    // קריאה למודל עם יציאה מובנית לפי JSON Schema
+    completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",            // דגם מהיר/חסכוני; אפשר לשנות לפי הצורך
+      temperature: 0,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: resume.text },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "CandidateProfile", schema: ProfileSchema, strict: true },
+      },
+    });
+  } catch (err: any) {
+    const t1 = Date.now();
+    // [Stage15] לוג כשל (שומר זמן/סטטוס/שגיאה; טוקנים=0 כי לא חזר שימוש)
+    await logAiUsage({
+      userId: user.id,
+      endpoint: "/api/resume/analyze",
+      method: "POST",
+      model: "gpt-4o-mini",
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      latencyMs: t1 - t0,
+      status: "error",
+      error: err?.message ?? "OPENAI_ERROR",
+    });
+    throw err; // נשמור את ההתנהגות הקודמת (ישוב 500)
+  }
+  const t1 = Date.now();
+
+  // [Stage15] לוג שימוש תקין ב-AI (מודל/טוקנים/latency)
+  {
+    const usage = completion.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    const model = completion.model ?? "gpt-4o-mini";
+    await logAiUsage({
+      userId: user.id,
+      endpoint: "/api/resume/analyze",
+      method: "POST",
+      model,
+      promptTokens: usage.prompt_tokens ?? 0,
+      completionTokens: usage.completion_tokens ?? 0,
+      totalTokens: usage.total_tokens ?? 0,
+      latencyMs: t1 - t0,
+      status: "ok",
+    });
+  }
 
   const content = completion.choices?.[0]?.message?.content ?? "{}";
 
   // ולידציה בסיסית
   let profile: any;
   try { profile = JSON.parse(content); }
-  catch { return NextResponse.json({ error: "model did not return valid JSON" }, { status: 502 }); }
+  catch {
+    return NextResponse.json({ error: "model did not return valid JSON" }, { status: 502 });
+  }
 
   if (
     !Array.isArray(profile.skills) ||
