@@ -6,6 +6,8 @@ import { rateLimitTouch, rateLimitHeaders } from "@/lib/security/rateLimit";
 import { PostCoverLetterSchema, PutCoverLetterSchema, wordCount } from "@/lib/validation/coverLetter";
 import { buildCoverLetterPrompt, extractResumeProfile } from "@/lib/cover-letter/prompt";
 import OpenAI from "openai";
+// [Stage15] מדדים
+import { logAiUsage, logEvent } from "@/lib/metrics";
 
 export const runtime = "nodejs";
 
@@ -109,7 +111,6 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     }
 
     // אחרי שהבאנו את resume ו- job:
-
     const profile = extractResumeProfile(resume.skills);
 
     // נבנה את האובייקט המדויק ש-ResumeLike מצפה לו
@@ -126,7 +127,6 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       maxWords,
     });
 
-
     // OpenAI
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -137,11 +137,50 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     }
     const openai = new OpenAI({ apiKey });
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: prompt.messages,
-      temperature: 0.3,
-    });
+    // [Stage15] מדידת זמן סביב OpenAI (וגם לוג שגיאה אם נופל)
+    const t0 = Date.now();
+    let completion;
+    try {
+      completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: prompt.messages,
+        temperature: 0.3,
+      });
+    } catch (err: any) {
+      const t1 = Date.now();
+      // לוג כשל ב-AI (לא משנה התנהגות — נזרוק הלאה)
+      await logAiUsage({
+        userId: user.id,
+        endpoint: "/api/jobs/[id]/cover-letter",
+        method: "POST",
+        model: "gpt-4o-mini",
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        latencyMs: t1 - t0,
+        status: "error",
+        error: err?.message ?? "OPENAI_ERROR",
+      });
+      throw err; // נשמר את ההתנהגות הקודמת (500)
+    }
+    const t1 = Date.now();
+
+    // [Stage15] לוג שימוש תקין ב-AI (טוקנים/מודל/Latency)
+    {
+      const usage = completion.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+      const model = completion.model ?? "gpt-4o-mini";
+      await logAiUsage({
+        userId: user.id,
+        endpoint: "/api/jobs/[id]/cover-letter",
+        method: "POST",
+        model,
+        promptTokens: usage.prompt_tokens ?? 0,
+        completionTokens: usage.completion_tokens ?? 0,
+        totalTokens: usage.total_tokens ?? 0,
+        latencyMs: t1 - t0,
+        status: "ok",
+      });
+    }
 
     const content = completion.choices?.[0]?.message?.content?.toString().trim() ?? "";
     if (!content) {
@@ -178,6 +217,14 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
         select: { id: true, coverLetter: true, updatedAt: true },
       });
     }
+
+    // [Stage15] אירוע מוצר: יצירה ראשונית/רג'נרציה
+    await logEvent({
+      userId: user.id,
+      type: existing ? "cover_letter_regenerated" : "cover_letter_created",
+      refId: saved.id,
+      meta: { jobId },
+    });
 
     return NextResponse.json(
       { ok: true, draft: shapeDraft(saved), maxWords },
