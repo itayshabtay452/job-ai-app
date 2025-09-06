@@ -1,8 +1,8 @@
-להלן **README מעודכן ל–Stage 13** (מוכן להדבקה ב-GitHub: Markdown + Mermaid).
+להלן **README מעודכן ל–Stage 14** (מוכן להדבקה ב-GitHub: Markdown + Mermaid).
 
 ---
 
-# Job AI App — README (Stage 13)
+# Job AI App — README (Stage 14)
 
 > גרסת README מותאמת ל-GitHub (Markdown + Mermaid).
 >
@@ -13,140 +13,154 @@
 > * **Match (Stage 11):** Job Detail → Compute Match → Persist → Show
 > * **Cover Letter (Stage 12):** Job Detail → Generate (AI) / Edit → Save Draft
 > * **UI/UX Polish (Stage 13):** Loading/Skeletons, Filter Chips + Clear All, Debounced Search, Match Badge, Navbar Menu, Resume Upload UX
+> * **Security (Stage 14):** Rate limiting, Zod validation, AuthN review
 
 ---
 
 ## 🔭 סקירה כללית
 
-האפליקציה כוללת שלושה צירים עיקריים + מכתב פנייה, וב-Stage 13 הוספנו **ליטוש חוויית משתמש**:
+בנוסף לפיצ’רים משלב 13, ב-**Stage 14** חיזקנו את שכבת האבטחה:
 
-* **מצבי טעינה** עם `Skeleton` ברכיבים מרכזיים (Jobs, Resume Upload, Match).
-* **חיפוש עשיר** בעמוד Jobs:
+* **Rate Limiting** לנתיבים כבדים/רגישים:
 
-  * סינון בזמן הקלדה (Debounce)
-  * **Filter Chips** עם אפשרות **Clear All**
-  * Empty/Error states ברורים
-* **Match Badge** קומפוננטת לקוח “קלילה” להצגת ציון התאם מיידי ברשימה.
-* **Navbar מודע אימות**: אווטאר + תפריט `<details>` (נגיש), מצב טעינה.
-* **Resume Upload משודרג**: Dropzone נגיש, Stepper לשלבים, Skeleton בזמן Analyze, הודעות 401 עם CTA להתחברות.
+  * `GET /api/jobs/:id/match`
+  * `GET/POST/PUT /api/jobs/:id/cover-letter`
+* **ולידציה עם Zod** לפרמטרים/גוף בקשות:
 
-> שים לב: Stage 13 ממוקד ב-UI/UX — ה-API/DB לא השתנו פונקציונלית בשלב זה.
+  * `GET /api/jobs/list` (query)
+  * `POST/PUT /api/jobs/:id/cover-letter` (body)
+* **ביקורת AuthN/AuthZ**: ודאנו שכל ה-API-ים הרגישים מוגנים ב-`withUser` וששאילתות מסננות לפי `userId`.
+
+> 💡 **מונחים**:
+> **AuthN (Authentication)** — אימות זהות (מי אתה).
+> **AuthZ (Authorization)** — הרשאה לפעולה/משאב (מה מותר לך).
 
 ---
 
 ## 📈 תרשימי זרימה
 
-### Jobs — חיפוש עם Debounce + Chips + Loading
+### Rate Limit ב-Match/Cover Letter
 
 ```mermaid
 sequenceDiagram
-  participant U as User
-  participant FE as JobsPage (Client)
-  participant API as GET /api/jobs/list
-  participant DB as Postgres
+  participant C as Client
+  participant API as API Route
+  participant RL as lib/security/rateLimit.ts
+  participant S as Service (DB/OpenAI)
 
-  U->>FE: הקלדה בשדות חיפוש/פילטר
-  FE->>FE: debounce 300–400ms
-  FE->>API: בקשה עם q/location/skill&page&pageSize
-  API->>DB: שאילתה עם פילטרים ועמוד
-  DB-->>API: items,total
-  API-->>FE: { ok, items, total }
-  FE-->>FE: מציג Skeleton בזמן הטעינה, Error/Empty states, Filter Chips + Clear All
+  C->>API: Request (/match or /cover-letter)
+  API->>RL: check(key=userId|ip, limit, window)
+  alt allowed
+    RL-->>API: ok
+    API->>S: continue (DB/OpenAI)
+    S-->>API: result
+    API-->>C: 200 + headers (X-RateLimit-*)
+  else blocked
+    RL-->>API: blocked
+    API-->>C: 429 Too Many Requests + Retry-After
+  end
 ```
 
-### Job Detail — Match + Cover Letter + Route Loading/Error
+### ולידציה עם Zod (דוגמה: `/api/jobs/list`)
 
 ```mermaid
 flowchart LR
-  JD["/jobs/:id (server)"]
-  L["app/jobs/:id/loading.tsx"]
-  E["app/jobs/:id/error.tsx"]
-  MP["JobMatchPanel (client)"]
-  MB["MatchBadge (client)"]
-  CL["CoverLetterEditor (client)"]
-  MAPI["GET /api/jobs/:id/match"]
-  CLAPI["/api/jobs/:id/cover-letter (GET | POST | PUT)"]
-
-  JD --> MP
-  JD --> CL
-  JD -.-> L
-  JD -.-> E
-  MP --> MAPI
-  MB --> MAPI
-  CL --> CLAPI
+  U[User] -->|query params| API[GET /api/jobs/list]
+  API --> Z[Zod parse]
+  Z -->|ok| DB[(Postgres)]
+  Z -->|error| E[400 ZOD_INVALID_QUERY]
 ```
 
 ---
 
 ## 🧱 סכמת נתונים (Prisma)
 
-**אין שינויי סכימה ב-Stage 13.** (נשאר כמו Stage 12)
+**אין שינויי סכימה ב-Stage 14**. (כמו Stage 12–13)
 
-* `Resume`, `Job`, `Match`, `ApplicationDraft` — ללא עדכונים בשלב זה.
-
----
-
-## 🔐 אימות
-
-* ממשיך להשתמש ב-`lib/auth.ts` (`withUser`) עבור נתיבי Match/Cover Letter.
-* Navbar מציג **Skeleton** בזמן `status === "loading"`, **Sign in** כשלא מחובר, **אווטאר + תפריט** כשמחובר.
+* `Resume`, `Job`, `Match`, `ApplicationDraft` — ללא עדכון במודל.
 
 ---
 
-## 🧪 API (ללא שינוי מ-Stage 12)
+## 🔐 אימות והרשאות
 
-1. `POST /api/resume/upload`
-2. `POST /api/resume/parse`
-3. `POST /api/resume/analyze`
+* `withUser` ממשיך להגן על:
+
+  * `POST /api/jobs/ingest`
+  * `POST /api/resume/upload`
+  * `POST /api/resume/parse`
+  * `POST /api/resume/analyze`
+  * `GET /api/jobs/:id/match`
+  * `GET/POST/PUT /api/jobs/:id/cover-letter`
+* ציבורי:
+
+  * `GET /api/jobs/list`
+  * `GET /api/jobs/:id`
+
+---
+
+## 🧪 API
+
+### (תזכורת Stage 9–13)
+
+1. `POST /api/resume/upload` *(מוגן)*
+2. `POST /api/resume/parse` *(מוגן)*
+3. `POST /api/resume/analyze` *(מוגן)*
 4. `POST /api/jobs/ingest` *(מוגן)*
-5. `GET /api/jobs/list`
-6. `GET /api/jobs/:id`
-7. `GET /api/jobs/:id/match`
-8. `GET /api/jobs/:id/cover-letter`
-9. `POST /api/jobs/:id/cover-letter`
-10. `PUT /api/jobs/:id/cover-letter`
+5. `GET /api/jobs/list` *(ציבורי)*
+6. `GET /api/jobs/:id` *(ציבורי)*
+7. `GET /api/jobs/:id/match` *(מוגן, RL)*
+8. `GET /api/jobs/:id/cover-letter` *(מוגן, RL)*
+9. `POST /api/jobs/:id/cover-letter` *(מוגן, RL, Zod)*
+10. `PUT /api/jobs/:id/cover-letter` *(מוגן, RL, Zod)*
 
 ---
 
-## 🖥️ UI — מה חדש ב-Stage 13
+### עדכונים מרכזיים ב-Stage 14
 
-### 1) Jobs List (פונקציונליות חדשה)
+#### A) Rate limiting (Match/Cover Letter)
 
-* **Debounced search** בזמן הקלדה (ללא צורך בלחיצה על “סנן”).
-* **Filter Chips** מתחת לטופס — אפשר להסיר כל פילטר ע״י X או **Clear All**.
-* **Loading Skeleton** בזמן בקשה.
-* **Empty/Error states** נעימים וברורים.
-* (אופציונלי) **MatchBadge** ליד כל Job, המציג ציון התאמה בזמן אמת (Lazy).
+* ספרייה: `lib/security/rateLimit.ts`
+* התנהגות:
 
-קבצים נוגעים:
+  * חריגה מהסף → `429 Too Many Requests` + כותרת `Retry-After`.
+  * כותרות שימושיות: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
 
-* `app/jobs/page.tsx` — קריאות API עם Debounce, ניהול טעינה/שגיאה.
-* `components/JobsFilters.tsx` — טריגר onChange בזמן הקלדה.
-* `components/FilterChips.tsx` — ניהול תגיות פילטר ו-Clear All.
-* `components/EmptyState.tsx`, `components/ErrorState.tsx` — תצוגות ריקות/שגיאה.
-* `components/MatchBadge.tsx` — בקשה ל-`/api/jobs/:id/match` קלילה לפריט.
+**curl לדוגמה (בדיקת חסימה):**
 
-### 2) Job Detail
+```bash
+# הרץ מהר כמה פעמים ברצף (מחובר) כדי לעבור את הסף
+curl -i "http://localhost:3000/api/jobs/<JOB_ID>/match"
+# מצופה: לאחר יותר מדי בקשות קצרות: 429 + Retry-After
+```
 
-* **Route loading/error**:
-  `app/jobs/[id]/loading.tsx`, `app/jobs/[id]/error.tsx`
-  → שליטה מלאה בטעינה/שגיאה במסך פרטי משרה.
-* ממשיך לכלול: `JobMatchPanel` + `CoverLetterEditor`.
+#### B) Zod Validation
 
-### 3) Navbar
+* ספריות:
 
-* מצבי אימות: `loading` → Skeleton, `unauthenticated` → Sign in, `authenticated` → אווטאר + תפריט `<details>` (נגיש).
+  * `lib/validation/jobs.ts` — סכמת query ל-`/api/jobs/list`
+  * `lib/validation/coverLetter.ts` — סכמות body ל-POST/PUT
+* ראוטים מעודכנים:
 
-קובץ: `components/Navbar.tsx`.
+  * `app/api/jobs/list/route.ts` — מחזיר `400 ZOD_INVALID_QUERY` עם `issues` על חריגה מגבולות (למשל `pageSize > 50`).
+  * `app/api/jobs/[id]/cover-letter/route.ts` — מחזיר `400` על גוף לא תקין, `422 OVER_WORD_LIMIT` על חריגה ממגבלת מילים העסקית.
 
-### 4) Resume Upload — UX
+**דוגמאות:**
 
-* **Dropzone** נגיש (גרירה/לחיצה/Enter/Space), תגית קובץ עם מחיקה.
-* **Stepper** לשלבים: Upload → Parse → Analyze.
-* **Skeleton** בזמן Analyze.
-* הודעות 401 עם כפתור התחברות.
+```bash
+# pageSize גדול מדי → 400
+curl -i "http://localhost:3000/api/jobs/list?pageSize=999"
 
-קובץ: `components/ResumeUpload.tsx`.
+# POST cover-letter עם גוף לא חוקי → 400
+curl -i -X POST -H "Content-Type: application/json" \
+  -d '{"maxWords":"not-a-number"}' \
+  "http://localhost:3000/api/jobs/<JOB_ID>/cover-letter"
+```
+
+---
+
+## 🖥️ UI (בלי שינוי מפונקציונליות Stage 13)
+
+* נשארים: Skeletons, Debounced Search, Filter Chips + Clear All, Match Badge, Navbar מודע אימות, Resume Upload משופר, route loading/error.
 
 ---
 
@@ -171,7 +185,7 @@ GITHUB_SECRET=...
 OPENAI_API_KEY=sk-...   # נדרש ל-POST cover-letter (שרת בלבד)
 ```
 
-> **חשוב:** אל תדחוף `.env/.env.local` לריפו. החזק טמפלייט נקי ב־`.env.local.example`.
+> **חשוב:** אל תדחוף `.env/.env.local` לריפו. החזק טמפלייט נקי ב-`.env.local.example`.
 
 ---
 
@@ -187,29 +201,29 @@ app/
       analyze/route.ts
     jobs/
       ingest/route.ts
-      list/route.ts
+      list/route.ts                     # Stage 14: Zod
       [id]/route.ts
-      [id]/match/route.ts
-      [id]/cover-letter/route.ts
+      [id]/match/route.ts               # Stage 14: Rate limit
+      [id]/cover-letter/route.ts        # Stage 14: Rate limit + Zod
   jobs/
     page.tsx
     [id]/
       page.tsx
-      loading.tsx                 # Stage 13
-      error.tsx                   # Stage 13
+      loading.tsx                       # Stage 13
+      error.tsx                         # Stage 13
 
 components/
   ui/
     button.tsx
-    skeleton.tsx                  # Stage 13
-  Navbar.tsx                      # Stage 13 (auth-aware)
-  ResumeUpload.tsx                # Stage 13 (dropzone/stepper)
-  JobsFilters.tsx                 # Stage 13 (debounced)
-  FilterChips.tsx                 # Stage 13
-  EmptyState.tsx                  # Stage 13
-  ErrorState.tsx                  # Stage 13
+    skeleton.tsx                        # Stage 13
+  Navbar.tsx
+  ResumeUpload.tsx
+  JobsFilters.tsx
+  FilterChips.tsx
+  EmptyState.tsx
+  ErrorState.tsx
   JobMatchPanel.tsx
-  MatchBadge.tsx                  # Stage 13
+  MatchBadge.tsx
   CoverLetterEditor.tsx
 
 lib/
@@ -221,9 +235,14 @@ lib/
     engine.ts
   cover-letter/
     prompt.ts
+  security/
+    rateLimit.ts                        # Stage 14
+  validation/
+    jobs.ts                             # Stage 14
+    coverLetter.ts                      # Stage 14
 
 hooks/
-  useDebouncedValue.ts            # Stage 13 (אם בשימוש)
+  useDebouncedValue.ts
 
 scripts/
   test-match.ts
@@ -241,33 +260,30 @@ prisma/
 
 ## 🧰 תקלות ופתרונות מהירים
 
-* **Skeleton לא מוצג** → ודא `components/ui/skeleton.tsx` קיים ומיובא נכון.
-* **Debounce לא עובד** → בדוק את ה-hook (`useDebouncedValue`) או את הקריאות ב-`useEffect` בהתאם ל-query.
-* **MatchBadge טעות טיפוס Ref** → ודא שלא מועבר `ref` של `<span>` ל-`Button`; עטוף את התוכן במקום, או העבר `ref` ל-`button`.
-* **Route Loading/Error לא נתפסים** → הקפד על השמות המדויקים `loading.tsx` / `error.tsx` בתיקיית הסגמנט `[id]`.
-* **401 ב-Match/Cover Letter** → התחבר (GitHub). הנתיבים מוגנים עם `withUser`.
-* **שגיאת dynamic/SSR** → אל תשתמש ב-`next/dynamic({ ssr:false })` בתוך Server Component; יבוא ישיר של Client Component מספיק.
+* **429 Too Many Requests** — חורג מ-rate limit; המתן ל-`Retry-After` או הפחת קצב.
+* **400 ZOD\_INVALID\_QUERY** ב-`/jobs/list` — בדוק טיפוסי פרמטרים (`page`, `pageSize`, `skill`) ומגבלות.
+* **401 ב-match/cover-letter** — הנתיבים מוגנים; התחבר ב-GitHub.
+* **422 `OVER_WORD_LIMIT`** — תקרת מילים עסקית; קצץ טקסט/הורד `maxWords`.
+* **TypeError ב-cover-letter** — ודא ש-`yearsExp` עובר כ-number/undefined, לא `null`.
 
 ---
 
-## ✅ צ’קליסט Stage 13
+## ✅ צ’קליסט Stage 14
 
-* [x] **Loading/Skeletons**: Jobs list, Resume Upload (Analyze), Match Panel/Badge
-* [x] **Debounced filters** ב-Jobs + **Filter Chips** + **Clear All**
-* [x] **Empty/Error states** נעימים
-* [x] **MatchBadge** קליל ברשימת המשרות
-* [x] **Navbar** מודע אימות: Skeleton/Sign in/Avatar Menu
-* [x] **Resume Upload** Dropzone + Stepper + 401 CTA
-* [x] **Route loading/error** ל-`/jobs/[id]`
-* [x] קומיטים נקיים (ללא `.env`)
+* [x] **Rate Limiting:** `/match`, `/cover-letter`
+* [x] **Zod Validation:** `jobs/list`, `cover-letter (POST/PUT)`
+* [x] **AuthN/AuthZ Review:** כל הנתיבים הרגישים מוגנים ב-`withUser`
+* [x] **בדיקות ידניות:** 200/400/401/422/429 + כותרות Rate Limit
+* [x] **Git:** קומיטים נקיים (ללא `.env`)
 
 ---
 
 ## 🔜 המשך דרך
 
-* **Stage 14** (אופציונלי): Toasts אחידים, שמירה אוטומטית (debounce) לטיוטות, שיפורי פרפורמנס (Cache/Prefetch), ו-“Score filter ≥ 70” ברשימת Jobs.
-* **DB יציבות**: `@@unique([userId, jobId])` ל-`Match`/`ApplicationDraft` + מעבר ל-`upsert`.
-* **RTL מלא**: מעבר מסודר ל-RTL אם יוחלט, יחד עם טסטים וסקירה ויזואלית.
+* **Hardening נוסף:** הוספת RL גם ל-`/api/resume/analyze`.
+* **DB יציבות:** `@@unique([userId, jobId])` ל-`Match`/`ApplicationDraft` + מעבר ל-`upsert`.
+* **Observability:** לוגים/מטריקות ל-429/400.
+* **Privacy:** סקר אבטחת נתונים (PII), מחזור חיים לקבצים זמניים.
 
 ---
 
