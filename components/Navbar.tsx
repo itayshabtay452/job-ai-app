@@ -13,6 +13,7 @@ const links = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/resume", label: "Resume" },
   { href: "/jobs", label: "Jobs" },
+  { href: "/metrics", label: "Metrics" },
 ];
 
 function InitialBubble({ nameOrEmail }: { nameOrEmail: string }) {
