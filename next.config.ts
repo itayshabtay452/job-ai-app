@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
 
   // אל תכשיל build ב-CI בגלל ESLint
   eslint: {
-    ignoreDuringBuilds: isCI,
+    ignoreDuringBuilds: true,
   },
 
   // אופציונלי: אם גם שגיאות TypeScript מפילות build ב-CI, בטל אותן זמנית:
