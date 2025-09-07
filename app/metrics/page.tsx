@@ -99,14 +99,13 @@ function DaysPicker({ active }: { active: number }) {
 export default async function MetricsPage({
   searchParams,
 }: {
-  searchParams?: { [k: string]: string | string[] | undefined };
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   // ✅ יחזיר user עם id, או יבצע redirect/throw אם לא מחובר (לפי ההלפר שלך)
   const { id: userId } = await requireUser();
 
-  const daysParam = Array.isArray(searchParams?.days)
-    ? searchParams?.days[0]
-    : searchParams?.days;
+  const sp = await searchParams;
+  const daysParam = Array.isArray(sp?.days) ? sp.days[0] : sp?.days;
   const days = Number.isFinite(Number(daysParam))
     ? Math.max(1, Math.min(365, Number(daysParam)))
     : 7;

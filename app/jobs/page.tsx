@@ -1,6 +1,7 @@
+//C:\Users\itays\Desktop\33\job-ai-app\app\jobs\page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import JobsFilters, { JobsQuery } from "@/components/JobsFilters";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,17 @@ type ListResp = {
   error?: string;
 };
 
+// דף /jobs: עוטף את קומפוננטת התוכן ב-Suspense כדי לאפשר CSR bailout לפי Next 15
 export default function JobsPage() {
+  return (
+    <Suspense fallback={<div aria-label="jobs-suspense-fallback" />}>
+      <JobsClient />
+    </Suspense>
+  );
+}
+
+// הקומפוננטה האמיתית שמבצעת שימוש ב-useSearchParams (נמצאת תחת Suspense)
+function JobsClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -69,8 +80,11 @@ export default function JobsPage() {
 
   // --- סנכרון ל-URL בכל שינוי (replace כדי לא לזהם היסטוריה) ---
   useEffect(() => {
-    router.replace(`/jobs?${qs}`);
-  }, [qs, router]);
+    const cur = searchParams.toString();
+    if (cur !== qs) {
+      router.replace(`/jobs?${qs}`, { scroll: false });
+    }
+  }, [qs, router, searchParams]);
 
   // --- טעינת נתונים מה-API בכל שינוי של qs ---
   useEffect(() => {
