@@ -26,8 +26,12 @@ function shapeDraft(d: { id: string; coverLetter: string; updatedAt: Date }) {
 }
 
 /** GET /api/jobs/[id]/cover-letter — שליפת טיוטה (אם קיימת) */
-export async function GET(req: Request, ctx: { params: { id: string } }) {
-  const jobId = ctx.params.id;
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const jobId = id;
 
   return withUser(async (_req, { user }) => {
     // RL: 30 לדקה
@@ -61,8 +65,12 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
 }
 
 /** POST /api/jobs/[id]/cover-letter — יצירה עם AI ושמירה כטיוטה */
-export async function POST(req: Request, ctx: { params: { id: string } }) {
-  const jobId = ctx.params.id;
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const jobId = id;
 
   return withUser(async (_req, { user }) => {
     // RL: 5 לכל 10 דקות
@@ -234,8 +242,12 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 }
 
 /** PUT /api/jobs/[id]/cover-letter — עדכון ידני ושמירה כטיוטה */
-export async function PUT(req: Request, ctx: { params: { id: string } }) {
-  const jobId = ctx.params.id;
+export async function PUT(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const jobId = id;
 
   return withUser(async (_req, { user }) => {
     // RL: 20 לדקה
