@@ -1,18 +1,20 @@
-//C:\Users\itays\Desktop\33\job-ai-app\app\jobs\[id]\page.tsx
-
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import JobMatchPanel from "@/components/JobMatchPanel"; // ← ייבוא רגיל של Client Component
-import CoverLetterEditor from "@/components/CoverLetterEditor"; // ← חדש
+import JobMatchPanel from "@/components/JobMatchPanel"; // Client Component
+import CoverLetterEditor from "@/components/CoverLetterEditor"; // Client Component
 
-// נשאיר את המטא-דאטה של Next:
 export const dynamic = "force-dynamic";
 
+// Next.js 15: params הוא Promise — יש לחלץ באמצעות await
 export default async function JobDetailPage({
   params,
-}: { params: { id: string } }) {
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+
   const job = await prisma.job.findUnique({
-    where: { id: params.id },
+    where: { id },
     select: {
       id: true,
       source: true,
@@ -74,7 +76,7 @@ export default async function JobDetailPage({
         </div>
       )}
 
-      {/* פנל ציון התאמה (Client) */}
+      {/* פנלים קליינטיים */}
       <JobMatchPanel jobId={job.id} />
       <CoverLetterEditor jobId={job.id} maxWords={220} />
     </main>

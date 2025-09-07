@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jobai
+        options: >-
+          --health-cmd="pg_isready -U postgres -d jobai"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      # DB זמין מה-host באמצעות הפורט שפורוורדנו למעלה
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/jobai?schema=public
+
+      # Env דרושים ל-NEXT/NextAuth בזמן build/run
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: testsecret
+      GITHUB_ID: dummy
+      GITHUB_SECRET: dummy
+      OPENAI_API_KEY: dummy # לא נקרא בפועל בטסטים (ממוקים), אבל עדיף להגדיר
+
+      # מבטיח ש-Next ב-CI ירוץ בפרוד (כמו בשרת)
+      NODE_ENV: production
+      CI: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node & PNPM
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm prisma generate
+
+      - name: Migrate database
+        run: pnpm prisma migrate deploy
+
+      - name: Build app
+        run: pnpm build
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps
+
+      - name: Run unit+integration tests (Vitest)
+        run: pnpm test:vi
+
+      - name: Run e2e smoke (Playwright)
+        run: pnpm test:e2e
