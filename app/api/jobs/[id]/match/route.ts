@@ -34,8 +34,11 @@ function extractCandidateSkills(input: unknown): string[] {
  * GET /api/jobs/[id]/match
  * Rate limit: 20 בקשות לדקה לכל משתמש (לנתיב זה).
  */
-export async function GET(req: Request, ctx: { params: { id: string } }) {
-  const jobId = ctx.params.id;
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: jobId } = await params;
 
   return withUser(async (_req, { user }) => {
     // --- RATE LIMIT ---
