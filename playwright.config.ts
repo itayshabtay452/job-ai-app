@@ -1,26 +1,34 @@
-// playwright.config.ts
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: 'tests',                              // ספריית הבסיס למבחני Playwright
-  testMatch: ['**/smoke/**/*.spec.ts'],          // רק מבחני smoke
-  testIgnore: ['**/unit/**', '**/integration/**'], // מתעלמים ממבחני Vitest
-  timeout: 30_000,
+  testDir: 'tests/smoke',
   fullyParallel: true,
-  reporter: 'list',
+  reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:3100',
-    trace: 'on-first-retry',
-    headless: true,
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    trace: 'retain-on-failure',
+    video: 'retain-on-failure',
   },
+  /**
+   * 🚀 Always run a production server for E2E.
+   * Requires `pnpm build` to be executed BEFORE `pnpm test:e2e`.
+   */
   webServer: {
-    // מריץ את Next במצב dev כדי לא לדרוש build
-    command: 'pnpm dev -p 3100',
-    url: 'http://localhost:3100',
-    reuseExistingServer: true,
+    command: 'pnpm exec next start -p 3000',
+    url: 'http://localhost:3000',
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      NEXT_TELEMETRY_DISABLED: '1',
+      PORT: '3000',
+    },
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
 });

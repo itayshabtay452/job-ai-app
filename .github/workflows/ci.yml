@@ -31,10 +31,8 @@ jobs:
       GITHUB_ID: dummy
       GITHUB_SECRET: dummy
       OPENAI_API_KEY: dummy
-      # תשאיר NODE_ENV=production רק אם אתה בטוח שכל השלבים לא צריכים devDeps.
-      # אנחנו עוקפים זאת בשלב ההתקנה עם --prod=false
-      NODE_ENV: production
       CI: true
+      NEXT_TELEMETRY_DISABLED: 1
 
     steps:
       - name: Checkout
@@ -64,12 +62,25 @@ jobs:
 
       - name: Build app
         run: pnpm build
+        env:
+          NODE_ENV: production
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
 
       - name: Run unit+integration tests (Vitest)
         run: pnpm test:vi
+        env:
+          NODE_ENV: production
 
       - name: Run e2e smoke (Playwright)
         run: pnpm test:e2e
+        env:
+          NODE_ENV: production
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
