@@ -25,17 +25,14 @@ jobs:
           --health-retries=10
 
     env:
-      # DB זמין מה-host באמצעות הפורט שפורוורדנו למעלה
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/jobai?schema=public
-
-      # Env דרושים ל-NEXT/NextAuth בזמן build/run
       NEXTAUTH_URL: http://localhost:3000
       NEXTAUTH_SECRET: testsecret
       GITHUB_ID: dummy
       GITHUB_SECRET: dummy
-      OPENAI_API_KEY: dummy # לא נקרא בפועל בטסטים (ממוקים), אבל עדיף להגדיר
-
-      # מבטיח ש-Next ב-CI ירוץ בפרוד (כמו בשרת)
+      OPENAI_API_KEY: dummy
+      # תשאיר NODE_ENV=production רק אם אתה בטוח שכל השלבים לא צריכים devDeps.
+      # אנחנו עוקפים זאת בשלב ההתקנה עם --prod=false
       NODE_ENV: production
       CI: true
 
@@ -43,23 +40,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node & PNPM
+      - name: Setup PNPM
         uses: pnpm/action-setup@v4
         with:
           version: 9
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
+          cache: pnpm
 
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
+      - name: Install deps (include devDependencies)
+        run: pnpm install --frozen-lockfile --prod=false
 
       - name: Prisma generate
-        run: pnpm prisma generate
+        run: pnpm exec prisma generate
 
       - name: Migrate database
-        run: pnpm prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: pnpm exec prisma migrate deploy
 
       - name: Build app
         run: pnpm build
