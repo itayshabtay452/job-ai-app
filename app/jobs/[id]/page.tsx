@@ -4,6 +4,7 @@ import JobMatchPanel from "@/components/JobMatchPanel"; // Client Component
 import CoverLetterEditor from "@/components/CoverLetterEditor"; // Client Component
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 // Next.js 15: params הוא Promise — יש לחלץ באמצעות await
 export default async function JobDetailPage({

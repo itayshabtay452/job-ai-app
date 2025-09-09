@@ -1,9 +1,7 @@
 // C:\Users\itays\Desktop\33\job-ai-app\app\api\resume\upload\route.ts
 import { NextResponse } from "next/server";
-import { writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { requireUser } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs"; // מוודא ריצה על Node (לא edge)
 
@@ -36,12 +34,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "invalid pdf signature" }, { status: 400 });
     }
 
-    // שמירה זמנית (נשתמש בזה בשלב הבא ל-parsing)
-    const id = randomUUID();
-    const tmpPath = join(tmpdir(), `resume-${id}.pdf`);
-    await writeFile(tmpPath, buf, { flag: "wx" }); // נכשל אם קיים – מגן מפני דריסה
+    // ✅ פרוד-פרנדלי: ננתח ונשמור ל-DB כאן (ללא tmp), כך שזה יעבוד גם ב-Vercel
+    const { id: userId } = await requireUser();
+    const { default: pdfParse } = await import("pdf-parse"); // ESM-ידידותי בפרוד
+    const parsed = await pdfParse(buf);
+    const text = (parsed.text || "").trim();
+    const pageCount = parsed.numpages ?? 0;
 
-    return NextResponse.json({ ok: true, id, bytes: size });
+    if (!text || text.length < 20) {
+      // עדיין מחזירים תשובה רכה – ה-UI יכול להציע OCR
+      return NextResponse.json({ ok: true, status: "needs_ocr", pageCount, bytes: size });
+    }
+
+   const resume = await prisma.resume.upsert({
+      where: { userId },
+      update: { text, skills: [], yearsExp: null },
+      create: { userId, text, skills: [], yearsExp: null },
+      select: { id: true },
+    });
+
+    // שומרים תאימות לאחור: מי שמסתמך על שדה id מה-Upload יקבל null (לא נדרש יותר),
+    // ומי שמסתמך על parse אחרי upload – יקבל מידית DB מעודכן (ראה המסלול המעודכן של /parse).
+    return NextResponse.json({
+      ok: true,
+      resumeId: resume.id,
+      pageCount,
+      bytes: size,
+    });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "upload error" }, { status: 500 });
   }

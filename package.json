@@ -13,7 +13,9 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:vi": "vitest run --config vitest.config.ts",
-    "test:all": "pnpm test:vi && pnpm test:e2e"
+    "test:all": "pnpm test:vi && pnpm test:e2e",
+    "postinstall": "prisma generate",
+    "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.10.0",

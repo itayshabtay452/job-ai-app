@@ -12,17 +12,23 @@
 
 # testing
 /coverage
+/playwright-report
+/test-results
+/blob-report
 
 # next.js
 /.next/
 /out/
 
-# production
+# turbo / build artifacts
+/.turbo
 /build
+/dist
 
 # misc
 .DS_Store
 *.pem
+.eslintcache
 
 # debug
 npm-debug.log*
@@ -43,4 +49,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# generated
 /lib/generated/prisma

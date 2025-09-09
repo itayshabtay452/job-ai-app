@@ -9,18 +9,40 @@ export const runtime = "nodejs";
 
 export const POST = withUser(async (req, { user }) => {
   const { id } = await req.json().catch(() => ({}));
-  if (!id || typeof id !== "string") {
-    return NextResponse.json({ error: "missing id" }, { status: 400 });
-  }
-
-  const filePath = join(tmpdir(), `resume-${id}.pdf`);
+  const filePath = id ? join(tmpdir(), `resume-${id}.pdf`) : null;
 
   try {
-    const buf = await readFile(filePath);
-    const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
-    const parsed = await pdfParse(buf);
-    const text = (parsed.text || "").trim();
-    const pageCount = parsed.numpages ?? 0;
+    // ניסיון לקרוא tmp אם נשלח id (לוקאל/CI). ב-Vercel לרוב זה לא קיים.
+    let text = "";
+    let pageCount: number | null = null;
+    if (filePath) {
+      try {
+        const buf = await readFile(filePath);
+        const { default: pdfParse } = await import("pdf-parse");
+        const parsed = await pdfParse(buf);
+        text = (parsed.text || "").trim();
+        pageCount = parsed.numpages ?? 0;
+      } catch {
+        // מתעלמים – ניפול לפולבאק DB
+      }
+    }
+
+    // ✅ פולבאק פרוד: אם אין קובץ זמני אבל יש כבר רשומה ב-DB (נוצרה ב-upload), החזר הצלחה
+    if (!text) {
+      const existing = await prisma.resume.findUnique({
+        where: { userId: user.id },
+        select: { id: true, text: true },
+      });
+      if (existing?.id && existing.text?.length) {
+        return NextResponse.json({
+          ok: true,
+          resumeId: existing.id,
+          pageCount,
+          chars: existing.text.length,
+        });
+      }      // אם אין כלום – זו ממש שגיאת קלט
+      return NextResponse.json({ error: "missing upload (ephemeral storage)" }, { status: 400 });
+    }
 
     if (!text || text.length < 20) {
       return NextResponse.json({ ok: true, id, status: "needs_ocr", pageCount });
@@ -37,6 +59,12 @@ export const POST = withUser(async (req, { user }) => {
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "parse error" }, { status: 500 });
   } finally {
-    await unlink(filePath).catch(() => {});
+    if (filePath) {
+      try {
+        await unlink(filePath);
+      } catch {
+        // ignore cleanup errors (e.g., ENOENT in serverless env)
+      }
+    }
   }
 });

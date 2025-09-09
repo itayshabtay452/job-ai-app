@@ -1,7 +1,4 @@
 import { NextResponse } from "next/server";         // אפשר להשאיר רק NextResponse
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-
 import { prisma } from "@/lib/db";
 import { withUser } from "@/lib/auth";
 import { normalizeFeed, NormalizedJob } from "@/lib/jobs/normalize";
@@ -23,11 +20,14 @@ export const POST = withUser(async (req: Request) => {
     raw = null;
   }
 
-  // fallback לפיד המקומי
+  // ✅ fallback לפיד מקומי (ללא FS): import דינמי כדי לכלול בבאנדל פרוד
   if (!raw) {
-    const p = join(process.cwd(), "data", "jobs-feed.json");
-    const buf = await readFile(p);
-    raw = JSON.parse(buf.toString());
+    try {
+      const mod = await import("@/data/jobs-feed.json");
+      raw = (mod as any).default ?? mod;
+    } catch {
+      raw = [];
+    }
   }
 
   if (!Array.isArray(raw)) {
