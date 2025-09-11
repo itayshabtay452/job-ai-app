@@ -1,68 +1,72 @@
-// C:\Users\itays\Desktop\33\job-ai-app\app\api\resume\upload\route.ts
+// app/api/resume/upload/route.ts
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { withUser } from "@/lib/auth";
 
-export const runtime = "nodejs"; // מוודא ריצה על Node (לא edge)
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic"; // ליתר בטחון ב-POST
 
-export async function POST(req: Request) {
+function bad(code: string, status = 400, extra?: Record<string, any>) {
+  // מחזיר גם error וגם code כדי שה-UI שלך יתפוס upData.error
+  return NextResponse.json({ ok: false, error: code, code, ...extra }, { status });
+}
+
+export const POST = withUser(async (req) => {
   try {
-    const form = await req.formData();
-    const file = form.get("file");
-
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "missing file" }, { status: 400 });
+    const ct = req.headers.get("content-type") || "";
+    if (!ct.includes("multipart/form-data")) {
+      return bad("INVALID_CONTENT_TYPE", 415, { ct });
     }
 
-    // בדיקות בסיסיות
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch (e) {
+      console.error("[upload] formData() failed:", e);
+      return bad("FORMDATA_PARSE_FAILED", 400);
+    }
+
+    const file = form.get("file");
+    if (!(file instanceof File)) {
+      return bad("MISSING_FILE", 400);
+    }
+
     const filename = file.name || "resume.pdf";
-    const size = file.size;
-    if (size === 0) return NextResponse.json({ error: "empty file" }, { status: 400 });
-    if (size > 5 * 1024 * 1024)
-      return NextResponse.json({ error: "file too large (max 5MB)" }, { status: 400 });
+    const size = file.size ?? 0;
 
-    // בדיקת סיומת ותוכן בסיסית
+    if (size <= 0) return bad("EMPTY_FILE", 400);
+    if (size > 5 * 1024 * 1024) return bad("FILE_TOO_LARGE", 400, { max: 5 * 1024 * 1024 });
+
     const lower = filename.toLowerCase();
-    if (!lower.endsWith(".pdf"))
-      return NextResponse.json({ error: "only PDF allowed" }, { status: 400 });
+    if (!lower.endsWith(".pdf")) return bad("ONLY_PDF_ALLOWED", 400, { filename });
 
+    // הופך את ה-File לבופר
     const buf = Buffer.from(await file.arrayBuffer());
 
-    // חתימת PDF בסיסית (%PDF בתחילת הקובץ)
+    // חתימת PDF בסיסית
     const header = buf.subarray(0, 4).toString("utf8");
     if (!header.startsWith("%PDF")) {
-      return NextResponse.json({ error: "invalid pdf signature" }, { status: 400 });
+      return bad("INVALID_PDF_SIGNATURE", 400);
     }
 
-    // ✅ פרוד-פרנדלי: ננתח ונשמור ל-DB כאן (ללא tmp), כך שזה יעבוד גם ב-Vercel
-    const { id: userId } = await requireUser();
-    const { default: pdfParse } = await import("pdf-parse"); // ESM-ידידותי בפרוד
-    const parsed = await pdfParse(buf);
-    const text = (parsed.text || "").trim();
-    const pageCount = parsed.numpages ?? 0;
+    // כותבים ל-TMP
+    const id = randomUUID();
+    const tmpPath = join(tmpdir(), `resume-${id}.pdf`);
 
-    if (!text || text.length < 20) {
-      // עדיין מחזירים תשובה רכה – ה-UI יכול להציע OCR
-      return NextResponse.json({ ok: true, status: "needs_ocr", pageCount, bytes: size });
+    try {
+      // לא משתמשים ב-'wx' כדי לא לקבל בעיות permission נדירות בוינדוס
+      await writeFile(tmpPath, buf);
+    } catch (e: any) {
+      console.error("[upload] writeFile failed:", e);
+      return bad("WRITE_FAILED", 500, { message: e?.message });
     }
 
-   const resume = await prisma.resume.upsert({
-      where: { userId },
-      update: { text, skills: [], yearsExp: null },
-      create: { userId, text, skills: [], yearsExp: null },
-      select: { id: true },
-    });
-
-    // שומרים תאימות לאחור: מי שמסתמך על שדה id מה-Upload יקבל null (לא נדרש יותר),
-    // ומי שמסתמך על parse אחרי upload – יקבל מידית DB מעודכן (ראה המסלול המעודכן של /parse).
-    return NextResponse.json({
-      ok: true,
-      resumeId: resume.id,
-      pageCount,
-      bytes: size,
-    });
+    return NextResponse.json({ ok: true, id, bytes: size });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "upload error" }, { status: 500 });
+    console.error("[upload] UNHANDLED:", e);
+    return bad("UNKNOWN", 500, { message: e?.message });
   }
-}
-// #endregion
+});
