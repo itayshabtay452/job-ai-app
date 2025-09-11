@@ -1,12 +1,11 @@
-// app/api/resume/analyze/route.ts
 import { NextResponse } from "next/server";
 import { withUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import OpenAI from "openai";
-// [Stage15] מדדים
 import { logAiUsage } from "@/lib/metrics";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 // JSON Schema לתשובת המודל
 const ProfileSchema = {
@@ -14,9 +13,9 @@ const ProfileSchema = {
   additionalProperties: false,
   properties: {
     skills: { type: "array", items: { type: "string" } },
-    tools:  { type: "array", items: { type: "string" } },
-    dbs:    { type: "array", items: { type: "string" } },
-    years:  { type: "number", minimum: 0 },
+    tools: { type: "array", items: { type: "string" } },
+    dbs: { type: "array", items: { type: "string" } },
+    years: { type: "number", minimum: 0 },
     highlights: { type: "array", items: { type: "string" } },
   },
   required: ["skills", "tools", "dbs", "years", "highlights"],
@@ -38,7 +37,6 @@ export const POST = withUser(async (_req, { user }) => {
     return NextResponse.json({ error: "OPENAI_API_KEY missing" }, { status: 500 });
   }
 
-  // להביא את הטקסט ששמרנו בשלב 8
   const resume = await prisma.resume.findUnique({ where: { userId: user.id } });
   if (!resume?.text?.trim()) {
     return NextResponse.json({ error: "no resume text to analyze" }, { status: 400 });
@@ -46,13 +44,11 @@ export const POST = withUser(async (_req, { user }) => {
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  // [Stage15] התחלת מדידה סביב קריאת OpenAI
   const t0 = Date.now();
   let completion;
   try {
-    // קריאה למודל עם יציאה מובנית לפי JSON Schema
     completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",            // דגם מהיר/חסכוני; אפשר לשנות לפי הצורך
+      model: "gpt-4o-mini",
       temperature: 0,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
@@ -65,7 +61,6 @@ export const POST = withUser(async (_req, { user }) => {
     });
   } catch (err: any) {
     const t1 = Date.now();
-    // [Stage15] לוג כשל (שומר זמן/סטטוס/שגיאה; טוקנים=0 כי לא חזר שימוש)
     await logAiUsage({
       userId: user.id,
       endpoint: "/api/resume/analyze",
@@ -78,11 +73,10 @@ export const POST = withUser(async (_req, { user }) => {
       status: "error",
       error: err?.message ?? "OPENAI_ERROR",
     });
-    throw err; // נשמור את ההתנהגות הקודמת (ישוב 500)
+    throw err;
   }
   const t1 = Date.now();
 
-  // [Stage15] לוג שימוש תקין ב-AI (מודל/טוקנים/latency)
   {
     const usage = completion.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     const model = completion.model ?? "gpt-4o-mini";
@@ -101,10 +95,10 @@ export const POST = withUser(async (_req, { user }) => {
 
   const content = completion.choices?.[0]?.message?.content ?? "{}";
 
-  // ולידציה בסיסית
   let profile: any;
-  try { profile = JSON.parse(content); }
-  catch {
+  try {
+    profile = JSON.parse(content);
+  } catch {
     return NextResponse.json({ error: "model did not return valid JSON" }, { status: 502 });
   }
 
@@ -118,7 +112,6 @@ export const POST = withUser(async (_req, { user }) => {
     return NextResponse.json({ error: "profile validation failed" }, { status: 502 });
   }
 
-  // שמירה: כל האובייקט בשדה Json 'skills' + עדכון yearsExp
   const updated = await prisma.resume.update({
     where: { userId: user.id },
     data: {

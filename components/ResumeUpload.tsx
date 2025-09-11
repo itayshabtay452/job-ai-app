@@ -75,65 +75,53 @@ export default function ResumeUpload() {
     setFile(f);
   }
 
-  async function handleUploadParseAnalyze() {
-    if (!file) return;
-    try {
-      // 1) Upload
-      setPhase("uploading");
-      setMsg("");
-      const fd = new FormData();
-      fd.append("file", file);
-      const upRes = await fetch("/api/resume/upload", { method: "POST", body: fd });
-      const upData = await upRes.json();
-      if (!upRes.ok) {
-        if (upRes.status === 401) throw new Error("נדרש להתחבר כדי להעלות קובץ (401)");
-        throw new Error(upData?.error || "שגיאה בהעלאה");
-      }
-      const tempId: string = upData.id;
-      setMsg(`העלאה הושלמה (id: ${tempId}). ממשיכים לניתוח…`);
+async function handleUploadParseAnalyze() {
+  if (!file) return;
+  try {
+    // 1) Upload + Parse (באותו ראוט)
+    setPhase("uploading");
+    setMsg("");
+    const fd = new FormData();
+    fd.append("file", file);
 
-      // 2) Parse
-      setPhase("parsing");
-      const parseRes = await fetch("/api/resume/parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: tempId }),
-      });
-      const parseData: ParseResult = await parseRes.json();
-      if (!parseRes.ok) {
-        const err = (parseData as any)?.error || "שגיאה בניתוח";
-        if (parseRes.status === 401) throw new Error("נדרש להתחבר כדי לנתח קובץ (401)");
-        throw new Error(err);
-      }
-      setParseResult(parseData);
+    const upRes = await fetch("/api/resume/upload", { method: "POST", body: fd });
+    const upData = await upRes.json();
+    if (!upRes.ok || !upData?.ok) {
+      if (upRes.status === 401) throw new Error("נדרש להתחבר כדי להעלות קובץ (401)");
+      throw new Error(upData?.error || "שגיאה בהעלאה/ניתוח PDF");
+    }
 
-      if ("status" in parseData && parseData.status === "needs_ocr") {
-        setMsg(`נותח אך ללא שכבת טקסט (כנראה PDF סרוק). עמודים: ${parseData.pageCount}.`);
-        setPhase("done");
-        inputRef.current && (inputRef.current.value = "");
-        return;
-      } else if ("ok" in parseData && parseData.ok) {
-        setMsg(`נותח בהצלחה. עמודים: ${(parseData as ParseResultOK).pageCount}. ממשיכים ל-AI…`);
-      }
+    // לשמור תוצאת "parse" למסך התקציר
+    setParseResult(upData);
 
-      // 3) Analyze (AI)
-      setPhase("analyzing");
-      const aiRes = await fetch("/api/resume/analyze", { method: "POST" });
-      const aiData: ProfileResult = await aiRes.json();
-      if (!aiRes.ok) {
-        const err = (aiData as any)?.error || "שגיאה בניתוח AI";
-        if (aiRes.status === 401) throw new Error("נדרש להתחבר כדי להפעיל AI (401)");
-        throw new Error(err);
-      }
-      setProfile((aiData as ProfileResultOK).profile);
-      setMsg("פרופיל מועמד הופק בהצלחה!");
+    if (upData.status === "needs_ocr") {
+      setMsg(`נותח אך ללא שכבת טקסט (כנראה PDF סרוק). עמודים: ${upData.pageCount}.`);
       setPhase("done");
       inputRef.current && (inputRef.current.value = "");
-    } catch (e: any) {
-      setPhase("error");
-      setMsg(e?.message || "שגיאה");
+      return;
+    } else {
+      setMsg(`נותח בהצלחה. עמודים: ${upData.pageCount}. ממשיכים ל-AI…`);
     }
+
+    // 2) Analyze (AI)
+    setPhase("analyzing");
+    const aiRes = await fetch("/api/resume/analyze", { method: "POST" });
+    const aiData = await aiRes.json();
+    if (!aiRes.ok || !aiData?.ok) {
+      if (aiRes.status === 401) throw new Error("נדרש להתחבר כדי להפעיל AI (401)");
+      throw new Error(aiData?.error || "שגיאה בניתוח AI");
+    }
+
+    setProfile(aiData.profile);
+    setMsg("פרופיל מועמד הופק בהצלחה!");
+    setPhase("done");
+    inputRef.current && (inputRef.current.value = "");
+  } catch (e: any) {
+    setPhase("error");
+    setMsg(e?.message || "שגיאה");
   }
+}
+
 
   const busy = phase === "uploading" || phase === "parsing" || phase === "analyzing";
 
